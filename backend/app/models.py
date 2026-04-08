@@ -29,7 +29,7 @@ class Genre(Base):
     id   = Column(Integer, primary_key=True)
     name = Column(String(100), unique=True, nullable=False)
 
-    movies = relationship("MovieGenre", back_populates="genre")
+    movies = relationship("Movie", secondary="movie_genres", back_populates="genres")
 
 
 class Movie(Base):
@@ -45,7 +45,7 @@ class Movie(Base):
     tmdb_rating    = Column(Float)
     cached_at      = Column(DateTime, default=datetime.utcnow)
 
-    genres  = relationship("MovieGenre", back_populates="movie")
+    genres  = relationship("Genre", secondary="movie_genres", back_populates="movies")
     entries = relationship("WatchlistEntry", back_populates="movie")
 
 
@@ -54,9 +54,6 @@ class MovieGenre(Base):
 
     movie_id = Column(Integer, ForeignKey("movies.id"), primary_key=True)
     genre_id = Column(Integer, ForeignKey("genres.id"), primary_key=True)
-
-    movie = relationship("Movie", back_populates="genres")
-    genre = relationship("Genre", back_populates="movies")
 
 
 class WatchStatus(enum.Enum):
