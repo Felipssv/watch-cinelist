@@ -1,0 +1,38 @@
+# ambiente virtual
+venv/
+.env
+.env.*
+
+# python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+
+# alembic
+alembic/versions/*.pyc
+
+# distribuição / build
+dist/
+build/
+*.egg-info/
+*.egg
+
+# testes
+.pytest_cache/
+.coverage
+htmlcov/
+
+# IDEs
+.vscode/
+.idea/
+*.iml
+
+# sistema operacional
+.DS_Store
+Thumbs.db
+
+# logs
+*.log
+logs/
