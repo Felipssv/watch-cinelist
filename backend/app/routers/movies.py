@@ -1,52 +1,45 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
+from datetime import datetime
 from app.database import get_db
 from app.models import Movie, Genre, MovieGenre
 from app.schemas.movie import MovieResponse, MovieSearchResult
 from app.services import tmdb
-from datetime import datetime
 
 router = APIRouter(prefix="/movies", tags=["movies"])
 
 
+def _parse_year(release_date: str | None) -> int | None:
+    if release_date:
+        return int(release_date[:4])
+    return None
+
+
 @router.get("/search", response_model=list[MovieSearchResult])
 async def search_movies(q: str, page: int = 1):
-    if not q:
-        raise HTTPException(status_code=400, detail="Parâmetro q é obrigatório")
-
     data = await tmdb.search_movies(q, page)
-    results = []
 
-    for item in data.get("results", []):
-        release_year = None
-        if item.get("release_date"):
-            release_year = int(item["release_date"][:4])
-
-        results.append(MovieSearchResult(
+    return [
+        MovieSearchResult(
             id=item["id"],
             title=item["title"],
             original_title=item.get("original_title"),
             poster_path=item.get("poster_path"),
             overview=item.get("overview"),
-            release_year=release_year,
+            release_year=_parse_year(item.get("release_date")),
             tmdb_rating=item.get("vote_average"),
-        ))
-
-    return results
+        )
+        for item in data.get("results", [])
+    ]
 
 
 @router.get("/{tmdb_id}", response_model=MovieResponse)
 async def get_movie(tmdb_id: int, db: Session = Depends(get_db)):
     movie = db.query(Movie).filter(Movie.id == tmdb_id).first()
-
     if movie:
         return movie
 
     data = await tmdb.get_movie_details(tmdb_id)
-
-    release_year = None
-    if data.get("release_date"):
-        release_year = int(data["release_date"][:4])
 
     movie = Movie(
         id=data["id"],
@@ -55,7 +48,7 @@ async def get_movie(tmdb_id: int, db: Session = Depends(get_db)):
         poster_path=data.get("poster_path"),
         backdrop_path=data.get("backdrop_path"),
         overview=data.get("overview"),
-        release_year=release_year,
+        release_year=_parse_year(data.get("release_date")),
         tmdb_rating=data.get("vote_average"),
         cached_at=datetime.utcnow(),
     )
@@ -66,9 +59,7 @@ async def get_movie(tmdb_id: int, db: Session = Depends(get_db)):
         if not genre:
             genre = Genre(id=genre_data["id"], name=genre_data["name"])
             db.add(genre)
-
-        movie_genre = MovieGenre(movie_id=movie.id, genre_id=genre.id)
-        db.add(movie_genre)
+        db.add(MovieGenre(movie_id=movie.id, genre_id=genre.id))
 
     db.commit()
     db.refresh(movie)

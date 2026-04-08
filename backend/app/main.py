@@ -3,7 +3,6 @@ from app.database import engine
 from app import models
 from app.routers import movies
 
-models.Base.metadata.create_all(bind=engine)
 
 app = FastAPI()
 
