@@ -157,8 +157,11 @@ O frontend estará disponível em `http://localhost:5173`
 
 | Método | Rota | Descrição |
 |--------|------|-----------|
-| `GET` | `/movies/search?q=` | Busca filmes no TMDB |
-| `GET` | `/movies/{tmdb_id}` | Detalhes do filme e salva no cache |
+| `GET` | `/movies/` | Retorna todos os filmes no banco (sem paginação) |
+| `GET` | `/movies/paginated?page=1&limit=20` | Retorna filmes do banco com paginação |
+| `GET` | `/movies/search?q=termo&page=1` | Busca filmes no TMDB e salva no banco |
+| `GET` | `/movies/bulk-populate?pages=5` | Popula o banco com múltiplos filmes do TMDB |
+| `GET` | `/movies/{tmdb_id}` | Retorna detalhes completos de um filme do banco ou TMDB |
 
 ---
 

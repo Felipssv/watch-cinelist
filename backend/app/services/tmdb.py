@@ -26,3 +26,45 @@ async def get_movie_details(tmdb_id: int):
         )
         response.raise_for_status()
         return response.json()
+
+
+async def get_popular_movies(page: int = 1):
+    async with httpx.AsyncClient() as client:
+        response = await client.get(
+            f"{BASE_URL}/movie/popular",
+            headers=HEADERS,
+            params={"page": page, "language": "pt-BR"}
+        )
+        response.raise_for_status()
+        return response.json()
+    
+async def get_top_rated_movies(page: int = 1):
+    async with httpx.AsyncClient() as client:
+        response = await client.get(
+            f"{BASE_URL}/movie/top_rated",
+            headers=HEADERS,
+            params={"page": page, "language": "pt-BR"}
+        )
+        response.raise_for_status()
+        return response.json()
+
+
+async def get_upcoming_movies(page: int = 1):
+    async with httpx.AsyncClient() as client:
+        response = await client.get(
+            f"{BASE_URL}/movie/upcoming",
+            headers=HEADERS,
+            params={"page": page, "language": "pt-BR"}
+        )
+        response.raise_for_status()
+        return response.json()
+
+async def get_now_playing_movies(page: int = 1):
+    async with httpx.AsyncClient() as client:
+        response = await client.get(
+            f"{BASE_URL}/movie/now_playing",
+            headers=HEADERS,
+            params={"page": page, "language": "pt-BR"}
+        )
+        response.raise_for_status()
+        return response.json()

@@ -1,4 +1,4 @@
-import { Play } from 'lucide-react';
+import { Play } from 'lucide-react'; 
 
 interface MovieCardProps {
   title: string;
@@ -6,11 +6,15 @@ interface MovieCardProps {
   rating?: string;
   id?: string;
   isDark?: boolean;
+  onClick?: () => void;
 }
 
-export function MovieCard({ title, imageUrl, rating, id, isDark = false }: MovieCardProps) {
+export function MovieCard({ title, imageUrl, rating, id, isDark = false, onClick }: MovieCardProps) {
   return (
-    <div className={`group flex-shrink-0 w-56 overflow-hidden rounded-lg border shadow-lg transition-all duration-300 hover:-translate-y-2 hover:shadow-xl ${isDark ? 'border-neutral-800 bg-neutral-900' : 'border-neutral-200 bg-white'}`}>
+    <button
+      onClick={onClick}
+      className={`group flex-shrink-0 w-56 overflow-hidden rounded-lg border shadow-lg transition-all duration-300 hover:-translate-y-2 hover:shadow-xl cursor-pointer ${isDark ? 'border-neutral-800 bg-neutral-900' : 'border-neutral-200 bg-white'}`}
+    >
       {/* Image Container */}
       <div className="relative h-80 overflow-hidden bg-black">
         <img
@@ -19,7 +23,7 @@ export function MovieCard({ title, imageUrl, rating, id, isDark = false }: Movie
           className="h-full w-full object-cover opacity-90 transition-all duration-700 group-hover:scale-105 group-hover:opacity-100"
         />
 
-        {/* Hover Overlay */}
+        {/* Hover Overlay -Apenas o ícone de Play visual */}
         <div className="absolute inset-0 flex items-center justify-center bg-black/40 opacity-0 backdrop-blur-[2px] transition-opacity duration-300 group-hover:opacity-100">
           <div className="flex items-center justify-center rounded-full border border-white/20 bg-white/10 p-4 backdrop-blur-md">
             <Play size={24} className="ml-1 fill-white text-white" />
@@ -53,6 +57,6 @@ export function MovieCard({ title, imageUrl, rating, id, isDark = false }: Movie
           )}
         </div>
       </div>
-    </div>
+    </button>
   );
 }

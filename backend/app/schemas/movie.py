@@ -25,6 +25,12 @@ class MovieSearchResult(MovieBase):
     pass
 
 
+class MovieSearchResponse(BaseModel):
+    results: list[MovieSearchResult]
+    page: int
+    total_pages: int
+
+
 class MovieResponse(MovieBase):
     backdrop_path: Optional[str] = None
     genres: list[GenreSchema] = []

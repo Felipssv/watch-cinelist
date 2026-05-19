@@ -1,21 +1,28 @@
 import { Search, User, Moon, Sun, Menu, X } from 'lucide-react';
 import { useState, useEffect } from 'react';
+import { useNavigate, useLocation } from 'react-router-dom';
+import { useThemeStore } from '../store/themeStore';
 
 interface HeaderProps {
-  isDark: boolean;
-  toggleTheme: () => void;
+  currentPage?: 'home' | 'movies' | 'watchlist';
 }
 
 const navLinks = [
-  { label: 'Início', active: true },
-  { label: 'Filmes', active: false },
-  { label: 'Séries', active: false },
-  { label: 'Minha Lista', active: false },
+  { label: 'Início', path: '/' },
+  { label: 'Filmes', path: '/filmes' },
+  { label: 'Minha Lista', path: '/minha-lista' },
 ];
 
-export function Header({ isDark, toggleTheme }: HeaderProps) {
+export function Header({ currentPage }: HeaderProps) {
+  const navigate = useNavigate();
+  const location = useLocation();
   const [menuOpen, setMenuOpen] = useState(false);
   const [scrolled, setScrolled] = useState(false);
+  
+  // 2. Puxando o estado e a função do Zustand
+  const { isDark, toggleTheme } = useThemeStore();
+
+  const isActive = (path: string) => location.pathname === path;
 
   // Detect scroll to slightly increase navbar opacity when user scrolls
   useEffect(() => {
@@ -41,27 +48,33 @@ export function Header({ isDark, toggleTheme }: HeaderProps) {
         }`}
       >
         <div className="mx-auto flex h-20 max-w-7xl items-center justify-between px-6">
-          {/* Logo & Desktop Navigation */}
-          <div className="flex items-center gap-12">
-            <h1 className="flex items-center gap-2 text-2xl font-bold tracking-tighter text-white">
-              <div className="flex h-6 w-6 items-center justify-center rounded-sm bg-red-600">
-                <div className="h-2 w-2 rounded-full bg-neutral-900"></div>
-              </div>
-              CineList
-            </h1>
+          {/* Logo */}
+          <button
+            onClick={() => navigate('/')}
+            className="flex items-center gap-2 transition-opacity hover:opacity-80"
+          >
+            <div className="flex h-6 w-6 items-center justify-center rounded-sm bg-red-600">
+              <div className="h-2 w-2 rounded-full bg-neutral-900"></div>
+            </div>
+            <span className="text-2xl font-bold tracking-tighter text-white">CineList</span>
+          </button>
 
-            <nav className="hidden gap-8 text-sm font-medium text-neutral-400 md:flex">
-              {navLinks.map((link) => (
-                <a
-                  key={link.label}
-                  href="#"
-                  className={`transition-colors hover:text-red-400 ${link.active ? 'text-white' : 'hover:text-white'}`}
-                >
-                  {link.label}
-                </a>
-              ))}
-            </nav>
-          </div>
+          {/* Desktop Navigation */}
+          <nav className="hidden gap-8 text-sm font-medium text-neutral-400 md:flex">
+            {navLinks.map((link) => (
+              <button
+                key={link.label}
+                onClick={() => navigate(link.path)}
+                className={`transition-colors ${
+                  isActive(link.path)
+                    ? 'text-white'
+                    : 'hover:text-red-400 hover:text-white'
+                }`}
+              >
+                {link.label}
+              </button>
+            ))}
+          </nav>
 
           {/* Desktop Actions */}
           <div className="flex items-center gap-6">
@@ -69,7 +82,7 @@ export function Header({ isDark, toggleTheme }: HeaderProps) {
               <Search size={20} />
             </button>
             <button
-              onClick={toggleTheme}
+              onClick={toggleTheme} // Continua funcionando igual, mas agora vem do Zustand!
               className="hidden text-neutral-400 transition-colors hover:text-white md:block"
               aria-label="Toggle theme"
             >
@@ -107,18 +120,20 @@ export function Header({ isDark, toggleTheme }: HeaderProps) {
           {/* Nav Links */}
           <nav className="mb-6 flex flex-col gap-1">
             {navLinks.map((link) => (
-              <a
+              <button
                 key={link.label}
-                href="#"
-                onClick={() => setMenuOpen(false)}
+                onClick={() => {
+                  navigate(link.path);
+                  setMenuOpen(false);
+                }}
                 className={`rounded-lg px-3 py-3 text-base font-medium transition-colors ${
-                  link.active
+                  isActive(link.path)
                     ? 'text-white'
                     : 'text-neutral-400 hover:bg-white/5 hover:text-white'
                 }`}
               >
                 {link.label}
-              </a>
+              </button>
             ))}
           </nav>
 

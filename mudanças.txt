@@ -1,0 +1,905 @@
+diff --git a/README.md b/README.md
+index 71e3fad..fe8ffc1 100644
+--- a/README.md
++++ b/README.md
+@@ -157,8 +157,11 @@ O frontend estará disponível em `http://localhost:5173`
+ 
+ | Método | Rota | Descrição |
+ |--------|------|-----------|
+-| `GET` | `/movies/search?q=` | Busca filmes no TMDB |
+-| `GET` | `/movies/{tmdb_id}` | Detalhes do filme e salva no cache |
++| `GET` | `/movies/` | Retorna todos os filmes no banco (sem paginação) |
++| `GET` | `/movies/paginated?page=1&limit=20` | Retorna filmes do banco com paginação |
++| `GET` | `/movies/search?q=termo&page=1` | Busca filmes no TMDB e salva no banco |
++| `GET` | `/movies/bulk-populate?pages=5` | Popula o banco com múltiplos filmes do TMDB |
++| `GET` | `/movies/{tmdb_id}` | Retorna detalhes completos de um filme do banco ou TMDB |
+ 
+ ---
+ 
+diff --git a/backend/app/main.py b/backend/app/main.py
+index e9a07f5..4d62072 100644
+--- a/backend/app/main.py
++++ b/backend/app/main.py
+@@ -1,4 +1,5 @@
+ from fastapi import FastAPI
++from fastapi.middleware.cors import CORSMiddleware
+ from app.database import engine
+ from app import models
+ from app.routers import movies
+@@ -6,6 +7,14 @@ from app.routers import movies
+ 
+ app = FastAPI()
+ 
++app.add_middleware(
++    CORSMiddleware,
++    allow_origins=["http://localhost:5173"],  # Vite dev server
++    allow_credentials=True,
++    allow_methods=["*"],
++    allow_headers=["*"],
++)
++
+ app.include_router(movies.router)
+ 
+ @app.get("/")
+diff --git a/backend/app/routers/movies.py b/backend/app/routers/movies.py
+index 61ffcf4..6958765 100644
+--- a/backend/app/routers/movies.py
++++ b/backend/app/routers/movies.py
+@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
+ from datetime import datetime
+ from app.database import get_db
+ from app.models import Movie, Genre, MovieGenre
+-from app.schemas.movie import MovieResponse, MovieSearchResult
++from app.schemas.movie import MovieResponse, MovieSearchResult, MovieSearchResponse
+ from app.services import tmdb
+ 
+ router = APIRouter(prefix="/movies", tags=["movies"])
+@@ -15,12 +15,137 @@ def _parse_year(release_date: str | None) -> int | None:
+     return None
+ 
+ 
+-@router.get("/search", response_model=list[MovieSearchResult])
+-async def search_movies(q: str, page: int = 1):
+-    data = await tmdb.search_movies(q, page)
++@router.get("/", response_model=list[MovieResponse])
++async def get_movies(db: Session = Depends(get_db)):
++    return db.query(Movie).all()
+ 
+-    return [
+-        MovieSearchResult(
++
++@router.get("/paginated", response_model=MovieSearchResponse)
++async def get_paginated_movies(page: int = 1, limit: int = 20, db: Session = Depends(get_db)):
++    """Retorna filmes do banco com paginação"""
++    # Limitar a página mínima
++    page = max(1, page)
++    
++    # Contar total de filmes
++    total_movies = db.query(Movie).count()
++    total_pages = (total_movies + limit - 1) // limit  # Arredondar para cima
++    
++    # Buscar filmes da página
++    movies = db.query(Movie).offset((page - 1) * limit).limit(limit).all()
++    
++    return MovieSearchResponse(
++        results=[
++            MovieSearchResult(
++                id=movie.id,
++                title=movie.title,
++                original_title=movie.original_title,
++                poster_path=movie.poster_path,
++                overview=movie.overview,
++                release_year=movie.release_year,
++                tmdb_rating=movie.tmdb_rating,
++            )
++            for movie in movies
++        ],
++        page=page,
++        total_pages=total_pages,
++    )
++
++
++@router.get("/bulk-populate", response_model=dict)
++async def bulk_populate(pages: int = 5, db: Session = Depends(get_db)):
++    """Popula o banco com filmes de múltiplas categorias e páginas"""
++    categories = ["popular", "top_rated", "upcoming"]
++    total_saved = 0
++    
++    for category in categories:
++        for page in range(1, pages + 1):
++            try:
++                if category == "popular":
++                    data = await tmdb.get_popular_movies(page)
++                elif category == "top_rated":
++                    data = await tmdb.get_top_rated_movies(page)
++                else:
++                    data = await tmdb.get_upcoming_movies(page)
++                
++                for item in data.get("results", []):
++                    tmdb_id = item["id"]
++                    movie = db.query(Movie).filter(Movie.id == tmdb_id).first()
++                    
++                    if not movie:
++                        movie = Movie(
++                            id=tmdb_id,
++                            title=item["title"],
++                            original_title=item.get("original_title"),
++                            poster_path=item.get("poster_path"),
++                            backdrop_path=item.get("backdrop_path"),
++                            overview=item.get("overview"),
++                            release_year=_parse_year(item.get("release_date")),
++                            tmdb_rating=item.get("vote_average"),
++                            cached_at=datetime.utcnow(),
++                        )
++                        db.add(movie)
++                        total_saved += 1
++                
++                db.commit()
++            except Exception as e:
++                print(f"Erro ao buscar {category} página {page}: {e}")
++                continue
++    
++    total_movies = db.query(Movie).count()
++    return {
++        "message": "Banco populado com sucesso",
++        "movies_saved": total_saved,
++        "total_movies_in_db": total_movies
++    }
++
++
++@router.get("/search", response_model=MovieSearchResponse)
++async def search_movies(
++    q: str | None = None, 
++    category: str | None = None, 
++    page: int = 1, 
++    db: Session = Depends(get_db)
++):
++    """Busca filmes no TMDB (por texto ou categoria) e salva automaticamente no banco"""
++    
++    # 1. Decide qual função do TMDB chamar com base nos parâmetros
++    if q:
++        data = await tmdb.search_movies(q, page)
++    elif category:
++        if category == "popular":
++            data = await tmdb.get_popular_movies(page)
++        elif category == "top_rated":
++            data = await tmdb.get_top_rated_movies(page)
++        elif category == "now_playing":
++            # Note: Você precisará garantir que esta função exista no seu app/services/tmdb.py
++            data = await tmdb.get_now_playing_movies(page)
++        else:
++            data = await tmdb.get_popular_movies(page) # Fallback seguro
++    else:
++        # Se não vier nem 'q' nem 'category', retorna os populares por padrão
++        data = await tmdb.get_popular_movies(page)
++    
++    # 2. O resto da lógica continua intacta! Salvando e mapeando os resultados:
++    results = []
++    for item in data.get("results", []):
++        tmdb_id = item["id"]
++        # Salva no banco se não existir
++        movie = db.query(Movie).filter(Movie.id == tmdb_id).first()
++        if not movie:
++            movie = Movie(
++                id=tmdb_id,
++                title=item["title"],
++                original_title=item.get("original_title"),
++                poster_path=item.get("poster_path"),
++                backdrop_path=item.get("backdrop_path"),
++                overview=item.get("overview"),
++                release_year=_parse_year(item.get("release_date")),
++                tmdb_rating=item.get("vote_average"),
++                cached_at=datetime.utcnow(),
++            )
++            db.add(movie)
++        
++        results.append(MovieSearchResult(
+             id=item["id"],
+             title=item["title"],
+             original_title=item.get("original_title"),
+@@ -28,9 +153,15 @@ async def search_movies(q: str, page: int = 1):
+             overview=item.get("overview"),
+             release_year=_parse_year(item.get("release_date")),
+             tmdb_rating=item.get("vote_average"),
+-        )
+-        for item in data.get("results", [])
+-    ]
++        ))
++    
++    db.commit()
++    
++    return MovieSearchResponse(
++        results=results,
++        page=page,
++        total_pages=data.get("total_pages", 1),
++    )
+ 
+ 
+ @router.get("/{tmdb_id}", response_model=MovieResponse)
+diff --git a/backend/app/schemas/movie.py b/backend/app/schemas/movie.py
+index 2a7a2f5..2362c11 100644
+--- a/backend/app/schemas/movie.py
++++ b/backend/app/schemas/movie.py
+@@ -25,6 +25,12 @@ class MovieSearchResult(MovieBase):
+     pass
+ 
+ 
++class MovieSearchResponse(BaseModel):
++    results: list[MovieSearchResult]
++    page: int
++    total_pages: int
++
++
+ class MovieResponse(MovieBase):
+     backdrop_path: Optional[str] = None
+     genres: list[GenreSchema] = []
+diff --git a/backend/app/services/tmdb.py b/backend/app/services/tmdb.py
+index 35ff6f5..a0cbf5d 100644
+--- a/backend/app/services/tmdb.py
++++ b/backend/app/services/tmdb.py
+@@ -25,4 +25,46 @@ async def get_movie_details(tmdb_id: int):
+             params={"language": "pt-BR"}
+         )
+         response.raise_for_status()
++        return response.json()
++
++
++async def get_popular_movies(page: int = 1):
++    async with httpx.AsyncClient() as client:
++        response = await client.get(
++            f"{BASE_URL}/movie/popular",
++            headers=HEADERS,
++            params={"page": page, "language": "pt-BR"}
++        )
++        response.raise_for_status()
++        return response.json()
++    
++async def get_top_rated_movies(page: int = 1):
++    async with httpx.AsyncClient() as client:
++        response = await client.get(
++            f"{BASE_URL}/movie/top_rated",
++            headers=HEADERS,
++            params={"page": page, "language": "pt-BR"}
++        )
++        response.raise_for_status()
++        return response.json()
++
++
++async def get_upcoming_movies(page: int = 1):
++    async with httpx.AsyncClient() as client:
++        response = await client.get(
++            f"{BASE_URL}/movie/upcoming",
++            headers=HEADERS,
++            params={"page": page, "language": "pt-BR"}
++        )
++        response.raise_for_status()
++        return response.json()
++
++async def get_now_playing_movies(page: int = 1):
++    async with httpx.AsyncClient() as client:
++        response = await client.get(
++            f"{BASE_URL}/movie/now_playing",
++            headers=HEADERS,
++            params={"page": page, "language": "pt-BR"}
++        )
++        response.raise_for_status()
+         return response.json()
+\ No newline at end of file
+diff --git a/frontend/src/App.tsx b/frontend/src/App.tsx
+index 9edf1cb..3d9d145 100644
+--- a/frontend/src/App.tsx
++++ b/frontend/src/App.tsx
+@@ -1,268 +1,30 @@
+-import { useState } from 'react';
+-import { Header } from './components/Header';
+-import { HeroSection } from './components/HeroSection';
+-import { MovieCard } from './components/MovieCard';
+-import { ChevronRight } from 'lucide-react';
++// App.tsx
++import { BrowserRouter, Routes, Route } from 'react-router-dom'
++import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+ 
+-export default function App() {
+-  const [isDark, setIsDark] = useState(false);
+-
+-  const toggleTheme = () => {
+-    setIsDark(!isDark);
+-  };
+-  const lastReturns = [
+-    {
+-      id: 'ID: 0824',
+-      title: 'Blade Runner',
+-      rating: '9.2',
+-      imageUrl: 'https://images.unsplash.com/photo-1594909122845-11baa439b7bf?auto=format&fit=crop&q=80&w=600',
+-    },
+-    {
+-      id: 'ID: 1102',
+-      title: 'The Thing',
+-      rating: '8.8',
+-      imageUrl: 'https://images.unsplash.com/photo-1626814026160-2237a95fc5a0?auto=format&fit=crop&q=80&w=600',
+-    },
+-    {
+-      id: 'ID: 3301',
+-      title: 'Akira',
+-      rating: '8.5',
+-      imageUrl: 'https://images.unsplash.com/photo-1536440136628-849c177e76a1?auto=format&fit=crop&q=80&w=600',
+-    },
+-    {
+-      id: 'ID: 0045',
+-      title: 'Drive',
+-      rating: '8.1',
+-      imageUrl: 'https://images.unsplash.com/photo-1613679074971-91fc27180061?auto=format&fit=crop&q=80&w=600',
+-    },
+-    {
+-      id: 'ID: 9921',
+-      title: 'Pulp Fiction',
+-      rating: '9.0',
+-      imageUrl: 'https://images.unsplash.com/photo-1594908122393-27150106941d?auto=format&fit=crop&q=80&w=600',
+-    },
+-    {
+-      id: 'ID: 0101',
+-      title: 'Terminator',
+-      rating: '8.7',
+-      imageUrl: 'https://images.unsplash.com/photo-1585951237318-9ea5e175b891?auto=format&fit=crop&q=80&w=600',
+-    },
+-  ];
+-
+-  const trendingMovies = [
+-    {
+-      id: 'ID: 2314',
+-      title: 'Interestelar',
+-      rating: '8.9',
+-      imageUrl: 'https://images.unsplash.com/photo-1561722798-9a732d141027?w=400&h=500&fit=crop',
+-    },
+-    {
+-      id: 'ID: 1210',
+-      title: 'Inception',
+-      rating: '9.1',
+-      imageUrl: 'https://images.unsplash.com/photo-1578671815798-7b9b0ab22d73?w=400&h=500&fit=crop',
+-    },
+-    {
+-      id: 'ID: 3017',
+-      title: 'Blade Runner 2049',
+-      rating: '8.7',
+-      imageUrl: 'https://images.unsplash.com/photo-1730303904038-308526f95092?w=400&h=500&fit=crop',
+-    },
+-    {
+-      id: 'ID: 4521',
+-      title: 'Dune',
+-      rating: '8.8',
+-      imageUrl: 'https://images.unsplash.com/photo-1609293519338-9e7a88404068?w=400&h=500&fit=crop',
+-    },
+-    {
+-      id: 'ID: 1999',
+-      title: 'The Matrix',
+-      rating: '9.3',
+-      imageUrl: 'https://images.unsplash.com/photo-1691814994093-bdba60cba4cc?w=400&h=500&fit=crop',
+-    },
+-  ];
++import Home from './pages/Home.tsx'
++import Movies from './pages/Movies.tsx'
++import MyList from './pages/MyList.tsx'
+ 
+-  const newReleases = [
+-    {
+-      id: 'ID: 6723',
+-      title: 'Oppenheimer',
+-      rating: '9.0',
+-      imageUrl: 'https://images.unsplash.com/photo-1608170825938-a8ea0305d46c?w=400&h=500&fit=crop',
++// Crie a instância do QueryClient fora do componente para não recriar a cada renderização
++const queryClient = new QueryClient({
++  defaultOptions: {
++    queries: {
++      refetchOnWindowFocus: false, // Opcional, mas recomendado: evita que o app faça novas requisições toda vez que você clica em outra aba do navegador e volta
+     },
+-    {
+-      id: 'ID: 6823',
+-      title: 'Flower Moon',
+-      rating: '8.6',
+-      imageUrl: 'https://images.unsplash.com/photo-1560405177-47dded9830ea?w=400&h=500&fit=crop',
+-    },
+-    {
+-      id: 'ID: 7023',
+-      title: 'Poor Things',
+-      rating: '8.4',
+-      imageUrl: 'https://images.unsplash.com/photo-1661860959714-812b529be430?w=400&h=500&fit=crop',
+-    },
+-    {
+-      id: 'ID: 6923',
+-      title: 'Zone of Interest',
+-      rating: '8.3',
+-      imageUrl: 'https://images.unsplash.com/photo-1730303906663-adbbd13bbdc4?w=400&h=500&fit=crop',
+-    },
+-    {
+-      id: 'ID: 7123',
+-      title: 'Anatomy of a Fall',
+-      rating: '8.5',
+-      imageUrl: 'https://images.unsplash.com/photo-1739433437912-cca661ba902f?w=400&h=500&fit=crop',
+-    },
+-  ];
++  },
++})
+ 
++export default function App() {
+   return (
+-    <div className={`min-h-screen ${isDark ? 'bg-neutral-950 selection:bg-red-900 selection:text-white' : 'bg-white selection:bg-red-100 selection:text-red-900'}`}>
+-      <Header isDark={isDark} toggleTheme={toggleTheme} />
+-
+-      <main>
+-        {/* Hero Section */}
+-        <HeroSection
+-          title="Dune: Parte Dois"
+-          description="Paul Atreides une-se a Chani e aos Fremen para vingar a conspiração que destruiu a sua família. Ao enfrentar a escolha entre o amor da sua vida e o destino do universo, ele tem de evitar o terrível futuro que só ele pode prever."
+-          imageUrl="https://images.unsplash.com/photo-1478720568477-152d9b164e26?auto=format&fit=crop&q=80&w=2000"
+-          tag="Filme da Semana"
+-          genre="Sci-Fi"
+-          rating="8.8"
+-          duration="2h 46min"
+-          year="2024"
+-          isDark={isDark}
+-        />
+-
+-        {/* Content Container */}
+-        <div className="mx-auto max-w-7xl px-6 py-12">
+-          {/* Recently Watched Section */}
+-          <section className="mb-20">
+-            <div className="mb-8 flex items-end justify-between">
+-              <div>
+-                <h3 className={`mb-2 text-2xl font-bold tracking-tight ${isDark ? 'text-white' : 'text-neutral-900'}`}>Assistidos Recentemente</h3>
+-                <p className="text-sm font-medium text-neutral-500">
+-                  Os filmes que você assistiu nos últimos dias.
+-                </p>
+-              </div>
+-              <button className={`group flex items-center gap-1 text-sm font-medium transition-colors ${isDark ? 'text-neutral-400 hover:text-white' : 'text-neutral-600 hover:text-neutral-900'}`}>
+-                Ver todas{' '}
+-                <ChevronRight
+-                  size={16}
+-                  className="transition-transform group-hover:translate-x-1"
+-                />
+-              </button>
+-            </div>
+-
+-            {/* Carousel Container */}
+-            <div className="hide-scrollbar snap-x overflow-x-auto pb-10">
+-              <div className="flex gap-6">
+-                {lastReturns.map((movie) => (
+-                  <div key={movie.id} className="snap-start pt-2">
+-                    <MovieCard
+-                      title={movie.title}
+-                      rating={movie.rating}
+-                      id={movie.id}
+-                      imageUrl={movie.imageUrl}
+-                      isDark={isDark}
+-                    />
+-                  </div>
+-                ))}
+-              </div>
+-            </div>
+-          </section>
+-
+-          {/* Trending Section */}
+-          <section className="mb-20">
+-            <div className="mb-8 flex items-end justify-between">
+-              <div>
+-                <h3 className={`mb-2 text-2xl font-bold tracking-tight ${isDark ? 'text-white' : 'text-neutral-900'}`}>Em Alta Esta Semana</h3>
+-                <p className="text-sm font-medium text-neutral-500">
+-                  Os filmes mais assistidos nos últimos 7 dias.
+-                </p>
+-              </div>
+-              <button className={`group flex items-center gap-1 text-sm font-medium transition-colors ${isDark ? 'text-neutral-400 hover:text-white' : 'text-neutral-600 hover:text-neutral-900'}`}>
+-                Ver todas{' '}
+-                <ChevronRight
+-                  size={16}
+-                  className="transition-transform group-hover:translate-x-1"
+-                />
+-              </button>
+-            </div>
+-
+-            <div className="hide-scrollbar snap-x overflow-x-auto pb-10">
+-              <div className="flex gap-6">
+-                {trendingMovies.map((movie) => (
+-                  <div key={movie.id} className="snap-start pt-2">
+-                    <MovieCard
+-                      title={movie.title}
+-                      rating={movie.rating}
+-                      id={movie.id}
+-                      imageUrl={movie.imageUrl}
+-                      isDark={isDark}
+-                    />
+-                  </div>
+-                ))}
+-              </div>
+-            </div>
+-          </section>
+-
+-          {/* New Releases Section */}
+-          <section className="mb-20">
+-            <div className="mb-8 flex items-end justify-between">
+-              <div>
+-                <h3 className={`mb-2 text-2xl font-bold tracking-tight ${isDark ? 'text-white' : 'text-neutral-900'}`}>Novos Lançamentos</h3>
+-                <p className="text-sm font-medium text-neutral-500">
+-                  Recém-adicionados ao acervo da CineList.
+-                </p>
+-              </div>
+-              <button className={`group flex items-center gap-1 text-sm font-medium transition-colors ${isDark ? 'text-neutral-400 hover:text-white' : 'text-neutral-600 hover:text-neutral-900'}`}>
+-                Ver todas{' '}
+-                <ChevronRight
+-                  size={16}
+-                  className="transition-transform group-hover:translate-x-1"
+-                />
+-              </button>
+-            </div>
+-
+-            <div className="hide-scrollbar snap-x overflow-x-auto pb-10">
+-              <div className="flex gap-6">
+-                {newReleases.map((movie) => (
+-                  <div key={movie.id} className="snap-start pt-2">
+-                    <MovieCard
+-                      title={movie.title}
+-                      rating={movie.rating}
+-                      id={movie.id}
+-                      imageUrl={movie.imageUrl}
+-                      isDark={isDark}
+-                    />
+-                  </div>
+-                ))}
+-              </div>
+-            </div>
+-          </section>
+-
+-        </div>
+-
+-        {/* Footer */}
+-        <footer className={`border-t py-8 ${isDark ? 'border-neutral-800 bg-neutral-900' : 'border-neutral-200 bg-neutral-50'}`}>
+-          <div className="mx-auto max-w-7xl px-6">
+-            <div className="flex flex-col items-center justify-center gap-4 text-center">
+-              <div className="flex items-center gap-2">
+-                <div className="flex h-5 w-5 items-center justify-center rounded-sm bg-red-600">
+-                  <div className={`h-1.5 w-1.5 rounded-full ${isDark ? 'bg-neutral-900' : 'bg-white'}`}></div>
+-                </div>
+-                <span className={`font-semibold ${isDark ? 'text-white' : 'text-neutral-900'}`}>CineList</span>
+-              </div>
+-              <p className={`text-sm ${isDark ? 'text-neutral-400' : 'text-neutral-600'}`}>
+-                Gestão de Filmes e Séries
+-              </p>
+-              <p className="text-xs text-neutral-500">
+-                © 2026 CineList. Desenvolvido como trabalho de faculdade.
+-              </p>
+-            </div>
+-          </div>
+-        </footer>
+-      </main>
+-    </div>
+-  );
++    <QueryClientProvider client={queryClient}>
++      <BrowserRouter>
++        <Routes>
++          <Route path="/" element={<Home />} />
++          <Route path="/filmes" element={<Movies />} />
++          <Route path="/minha-lista" element={<MyList />} />
++        </Routes>
++      </BrowserRouter>
++    </QueryClientProvider>
++  )
+ }
+\ No newline at end of file
+diff --git a/frontend/src/components/Header.tsx b/frontend/src/components/Header.tsx
+index 81d5e27..3bc77b0 100644
+--- a/frontend/src/components/Header.tsx
++++ b/frontend/src/components/Header.tsx
+@@ -1,21 +1,28 @@
+ import { Search, User, Moon, Sun, Menu, X } from 'lucide-react';
+ import { useState, useEffect } from 'react';
++import { useNavigate, useLocation } from 'react-router-dom';
++import { useThemeStore } from '../store/themeStore';
+ 
+ interface HeaderProps {
+-  isDark: boolean;
+-  toggleTheme: () => void;
++  currentPage?: 'home' | 'movies' | 'watchlist';
+ }
+ 
+ const navLinks = [
+-  { label: 'Início', active: true },
+-  { label: 'Filmes', active: false },
+-  { label: 'Séries', active: false },
+-  { label: 'Minha Lista', active: false },
++  { label: 'Início', path: '/' },
++  { label: 'Filmes', path: '/filmes' },
++  { label: 'Minha Lista', path: '/minha-lista' },
+ ];
+ 
+-export function Header({ isDark, toggleTheme }: HeaderProps) {
++export function Header({ currentPage }: HeaderProps) {
++  const navigate = useNavigate();
++  const location = useLocation();
+   const [menuOpen, setMenuOpen] = useState(false);
+   const [scrolled, setScrolled] = useState(false);
++  
++  // 2. Puxando o estado e a função do Zustand
++  const { isDark, toggleTheme } = useThemeStore();
++
++  const isActive = (path: string) => location.pathname === path;
+ 
+   // Detect scroll to slightly increase navbar opacity when user scrolls
+   useEffect(() => {
+@@ -41,27 +48,33 @@ export function Header({ isDark, toggleTheme }: HeaderProps) {
+         }`}
+       >
+         <div className="mx-auto flex h-20 max-w-7xl items-center justify-between px-6">
+-          {/* Logo & Desktop Navigation */}
+-          <div className="flex items-center gap-12">
+-            <h1 className="flex items-center gap-2 text-2xl font-bold tracking-tighter text-white">
+-              <div className="flex h-6 w-6 items-center justify-center rounded-sm bg-red-600">
+-                <div className="h-2 w-2 rounded-full bg-neutral-900"></div>
+-              </div>
+-              CineList
+-            </h1>
++          {/* Logo */}
++          <button
++            onClick={() => navigate('/')}
++            className="flex items-center gap-2 transition-opacity hover:opacity-80"
++          >
++            <div className="flex h-6 w-6 items-center justify-center rounded-sm bg-red-600">
++              <div className="h-2 w-2 rounded-full bg-neutral-900"></div>
++            </div>
++            <span className="text-2xl font-bold tracking-tighter text-white">CineList</span>
++          </button>
+ 
+-            <nav className="hidden gap-8 text-sm font-medium text-neutral-400 md:flex">
+-              {navLinks.map((link) => (
+-                <a
+-                  key={link.label}
+-                  href="#"
+-                  className={`transition-colors hover:text-red-400 ${link.active ? 'text-white' : 'hover:text-white'}`}
+-                >
+-                  {link.label}
+-                </a>
+-              ))}
+-            </nav>
+-          </div>
++          {/* Desktop Navigation */}
++          <nav className="hidden gap-8 text-sm font-medium text-neutral-400 md:flex">
++            {navLinks.map((link) => (
++              <button
++                key={link.label}
++                onClick={() => navigate(link.path)}
++                className={`transition-colors ${
++                  isActive(link.path)
++                    ? 'text-white'
++                    : 'hover:text-red-400 hover:text-white'
++                }`}
++              >
++                {link.label}
++              </button>
++            ))}
++          </nav>
+ 
+           {/* Desktop Actions */}
+           <div className="flex items-center gap-6">
+@@ -69,7 +82,7 @@ export function Header({ isDark, toggleTheme }: HeaderProps) {
+               <Search size={20} />
+             </button>
+             <button
+-              onClick={toggleTheme}
++              onClick={toggleTheme} // Continua funcionando igual, mas agora vem do Zustand!
+               className="hidden text-neutral-400 transition-colors hover:text-white md:block"
+               aria-label="Toggle theme"
+             >
+@@ -107,18 +120,20 @@ export function Header({ isDark, toggleTheme }: HeaderProps) {
+           {/* Nav Links */}
+           <nav className="mb-6 flex flex-col gap-1">
+             {navLinks.map((link) => (
+-              <a
++              <button
+                 key={link.label}
+-                href="#"
+-                onClick={() => setMenuOpen(false)}
++                onClick={() => {
++                  navigate(link.path);
++                  setMenuOpen(false);
++                }}
+                 className={`rounded-lg px-3 py-3 text-base font-medium transition-colors ${
+-                  link.active
++                  isActive(link.path)
+                     ? 'text-white'
+                     : 'text-neutral-400 hover:bg-white/5 hover:text-white'
+                 }`}
+               >
+                 {link.label}
+-              </a>
++              </button>
+             ))}
+           </nav>
+ 
+@@ -154,4 +169,4 @@ export function Header({ isDark, toggleTheme }: HeaderProps) {
+       )}
+     </>
+   );
+-}
++}
+\ No newline at end of file
+diff --git a/frontend/src/components/HeroSection.tsx b/frontend/src/components/HeroSection.tsx
+index 05b855a..3f388e0 100644
+--- a/frontend/src/components/HeroSection.tsx
++++ b/frontend/src/components/HeroSection.tsx
+@@ -1,4 +1,4 @@
+-import { Play, Plus, Star, Clock } from 'lucide-react';
++import { Play, Plus, Star, Clock, Check } from 'lucide-react'; 
+ import { useEffect, useRef } from 'react';
+ 
+ interface HeroSectionProps {
+@@ -11,6 +11,10 @@ interface HeroSectionProps {
+   duration?: string;
+   year?: string;
+   isDark?: boolean;
++  // Novas propriedades para os botões:
++  onPlayClick?: () => void;
++  onListClick?: () => void;
++  isInList?: boolean;
+ }
+ 
+ export function HeroSection({
+@@ -23,6 +27,9 @@ export function HeroSection({
+   duration = '2h 46min',
+   year = '2024',
+   isDark = false,
++  onPlayClick,
++  onListClick,
++  isInList = false,
+ }: HeroSectionProps) {
+   const imgRef = useRef<HTMLImageElement>(null);
+ 
+@@ -30,7 +37,6 @@ export function HeroSection({
+     const handleScroll = () => {
+       if (!imgRef.current) return;
+       const scrollY = window.scrollY;
+-      // Parallax: image moves at 35% of scroll speed, so it lags behind
+       imgRef.current.style.transform = `translateY(${scrollY * 0.35}px)`;
+     };
+ 
+@@ -43,7 +49,7 @@ export function HeroSection({
+       className={`relative flex w-full items-end overflow-hidden ${isDark ? 'bg-neutral-950' : 'bg-white'}`}
+       style={{ minHeight: '92vh' }}
+     >
+-      {/* Background Image — overflow:hidden on section clips parallax movement */}
++      {/* Background Image */}
+       <div className="absolute inset-0 z-0">
+         <img
+           ref={imgRef}
+@@ -52,7 +58,6 @@ export function HeroSection({
+           className="h-full w-full object-cover will-change-transform"
+           style={{
+             opacity: isDark ? 0.9 : 0.82,
+-            // Extra height so parallax movement doesn't show gaps
+             minHeight: '110%',
+             top: '-5%',
+             position: 'absolute',
+@@ -82,7 +87,7 @@ export function HeroSection({
+           <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,transparent_0%,transparent_50%,rgba(0,0,0,0.08)_85%,rgba(0,0,0,0.25)_100%)]"></div>
+         )}
+ 
+-        {/* Bottom fade — dissolves into the sections below */}
++        {/* Bottom fade */}
+         <div
+           className="absolute bottom-0 left-0 right-0 z-10"
+           style={{
+@@ -115,7 +120,6 @@ export function HeroSection({
+ 
+           {/* Rating + Duration + Year */}
+           <div className="mb-6 flex flex-wrap items-center gap-4">
+-            {/* Star Rating */}
+             <div className="flex items-center gap-1.5">
+               <Star size={15} className="fill-amber-400 text-amber-400" />
+               <span className={`text-sm font-semibold ${isDark ? 'text-white' : 'text-neutral-900'}`}>
+@@ -126,7 +130,6 @@ export function HeroSection({
+ 
+             <span className={`h-3.5 w-px ${isDark ? 'bg-neutral-700' : 'bg-neutral-400'}`}></span>
+ 
+-            {/* Duration */}
+             <div className="flex items-center gap-1.5">
+               <Clock size={14} className={isDark ? 'text-neutral-400' : 'text-neutral-500'} />
+               <span className={`text-sm ${isDark ? 'text-neutral-300' : 'text-neutral-600'}`}>
+@@ -136,24 +139,34 @@ export function HeroSection({
+ 
+             <span className={`h-3.5 w-px ${isDark ? 'bg-neutral-700' : 'bg-neutral-400'}`}></span>
+ 
+-            {/* Year */}
+             <span className={`text-sm ${isDark ? 'text-neutral-400' : 'text-neutral-600'}`}>
+               {year}
+             </span>
+           </div>
+ 
+-          {/* Description */}
+           <p className={`mb-10 max-w-xl text-lg font-light leading-relaxed ${isDark ? 'text-neutral-400' : 'text-neutral-600'}`}>
+             {description}
+           </p>
+ 
+-          {/* Action Buttons */}
++          {/* Action Buttons - Agora funcionais! */}
+           <div className="flex flex-wrap items-center gap-4">
+-            <button className={`flex items-center gap-2 rounded-full px-8 py-3.5 font-semibold transition-colors ${isDark ? 'bg-white text-neutral-900 hover:bg-neutral-200' : 'bg-neutral-900 text-white hover:bg-neutral-800'}`}>
++            <button 
++              onClick={onPlayClick}
++              className={`flex items-center gap-2 rounded-full px-8 py-3.5 font-semibold transition-colors ${isDark ? 'bg-white text-neutral-900 hover:bg-neutral-200' : 'bg-neutral-900 text-white hover:bg-neutral-800'}`}
++            >
+               <Play size={18} className={isDark ? 'fill-neutral-900' : 'fill-white'} /> Assistir
+             </button>
+-            <button className={`flex items-center gap-2 rounded-full border px-8 py-3.5 font-semibold backdrop-blur-md transition-colors ${isDark ? 'border-neutral-700 bg-neutral-900/50 text-white hover:bg-neutral-800' : 'border-neutral-300 bg-white/80 text-neutral-900 hover:bg-neutral-100'}`}>
+-              <Plus size={18} /> Minha Lista
++            
++            <button 
++              onClick={onListClick}
++              className={`flex items-center gap-2 rounded-full border px-8 py-3.5 font-semibold backdrop-blur-md transition-colors ${
++                isInList 
++                  ? isDark ? 'border-red-500 bg-red-500/20 text-red-100 hover:bg-red-500/30' : 'border-red-500 bg-red-50 text-red-700 hover:bg-red-100'
++                  : isDark ? 'border-neutral-700 bg-neutral-900/50 text-white hover:bg-neutral-800' : 'border-neutral-300 bg-white/80 text-neutral-900 hover:bg-neutral-100'
++              }`}
++            >
++              {isInList ? <Check size={18} /> : <Plus size={18} />} 
++              {isInList ? 'Na Lista' : 'Minha Lista'}
+             </button>
+           </div>
+         </div>
+diff --git a/frontend/src/components/MovieCard.tsx b/frontend/src/components/MovieCard.tsx
+index 926798c..d80ac52 100644
+--- a/frontend/src/components/MovieCard.tsx
++++ b/frontend/src/components/MovieCard.tsx
+@@ -1,4 +1,4 @@
+-import { Play } from 'lucide-react';
++import { Play } from 'lucide-react'; 
+ 
+ interface MovieCardProps {
+   title: string;
+@@ -6,11 +6,15 @@ interface MovieCardProps {
+   rating?: string;
+   id?: string;
+   isDark?: boolean;
++  onClick?: () => void;
+ }
+ 
+-export function MovieCard({ title, imageUrl, rating, id, isDark = false }: MovieCardProps) {
++export function MovieCard({ title, imageUrl, rating, id, isDark = false, onClick }: MovieCardProps) {
+   return (
+-    <div className={`group flex-shrink-0 w-56 overflow-hidden rounded-lg border shadow-lg transition-all duration-300 hover:-translate-y-2 hover:shadow-xl ${isDark ? 'border-neutral-800 bg-neutral-900' : 'border-neutral-200 bg-white'}`}>
++    <button
++      onClick={onClick}
++      className={`group flex-shrink-0 w-56 overflow-hidden rounded-lg border shadow-lg transition-all duration-300 hover:-translate-y-2 hover:shadow-xl cursor-pointer ${isDark ? 'border-neutral-800 bg-neutral-900' : 'border-neutral-200 bg-white'}`}
++    >
+       {/* Image Container */}
+       <div className="relative h-80 overflow-hidden bg-black">
+         <img
+@@ -19,7 +23,7 @@ export function MovieCard({ title, imageUrl, rating, id, isDark = false }: Movie
+           className="h-full w-full object-cover opacity-90 transition-all duration-700 group-hover:scale-105 group-hover:opacity-100"
+         />
+ 
+-        {/* Hover Overlay */}
++        {/* Hover Overlay -Apenas o ícone de Play visual */}
+         <div className="absolute inset-0 flex items-center justify-center bg-black/40 opacity-0 backdrop-blur-[2px] transition-opacity duration-300 group-hover:opacity-100">
+           <div className="flex items-center justify-center rounded-full border border-white/20 bg-white/10 p-4 backdrop-blur-md">
+             <Play size={24} className="ml-1 fill-white text-white" />
+@@ -53,6 +57,6 @@ export function MovieCard({ title, imageUrl, rating, id, isDark = false }: Movie
+           )}
+         </div>
+       </div>
+-    </div>
++    </button>
+   );
+ }
+\ No newline at end of file
+diff --git a/frontend/src/main.tsx b/frontend/src/main.tsx
+index d0061b4..f89ea50 100644
+--- a/frontend/src/main.tsx
++++ b/frontend/src/main.tsx
+@@ -6,8 +6,8 @@ import { StrictMode } from 'react'
+ import { createRoot } from 'react-dom/client'
+ import App from './App.tsx'
+ 
+-createRoot(document.getElementById('root')).render(
++createRoot(document.getElementById('root')!).render(
+   <StrictMode>
+     <App />
+   </StrictMode>,
+-)
++)
+\ No newline at end of file
