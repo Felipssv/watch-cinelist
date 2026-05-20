@@ -1,15 +1,18 @@
-import { Search, User, Moon, Sun, Menu, X } from 'lucide-react';
+import { Search, User, Moon, Sun, Menu, X, LogOut } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useThemeStore } from '../store/themeStore';
+import { useAuthStore } from '../store/authStore';
+import { useLogout } from '../hooks/useAuth';
 
 interface HeaderProps {
-  currentPage?: 'home' | 'movies' | 'watchlist';
+  currentPage?: 'home' | 'movies' | 'watchlist' | 'trending';
 }
 
 const navLinks = [
   { label: 'Início', path: '/' },
   { label: 'Filmes', path: '/filmes' },
+  { label: 'Em Alta', path: '/trending' },
   { label: 'Minha Lista', path: '/minha-lista' },
 ];
 
@@ -18,20 +21,20 @@ export function Header({ currentPage }: HeaderProps) {
   const location = useLocation();
   const [menuOpen, setMenuOpen] = useState(false);
   const [scrolled, setScrolled] = useState(false);
-  
-  // 2. Puxando o estado e a função do Zustand
+  const [userMenuOpen, setUserMenuOpen] = useState(false);
+
   const { isDark, toggleTheme } = useThemeStore();
+  const user = useAuthStore((s) => s.user);
+  const logout = useLogout();
 
   const isActive = (path: string) => location.pathname === path;
 
-  // Detect scroll to slightly increase navbar opacity when user scrolls
   useEffect(() => {
     const onScroll = () => setScrolled(window.scrollY > 20);
     window.addEventListener('scroll', onScroll, { passive: true });
     return () => window.removeEventListener('scroll', onScroll);
   }, []);
 
-  // Close mobile menu on resize to desktop
   useEffect(() => {
     const onResize = () => {
       if (window.innerWidth >= 768) setMenuOpen(false);
@@ -39,6 +42,17 @@ export function Header({ currentPage }: HeaderProps) {
     window.addEventListener('resize', onResize);
     return () => window.removeEventListener('resize', onResize);
   }, []);
+
+  useEffect(() => {
+    const onClickOutside = (e: MouseEvent) => {
+      const target = e.target as HTMLElement;
+      if (!target.closest('[data-user-menu]')) {
+        setUserMenuOpen(false);
+      }
+    };
+    if (userMenuOpen) document.addEventListener('mousedown', onClickOutside);
+    return () => document.removeEventListener('mousedown', onClickOutside);
+  }, [userMenuOpen]);
 
   return (
     <>
@@ -82,18 +96,46 @@ export function Header({ currentPage }: HeaderProps) {
               <Search size={20} />
             </button>
             <button
-              onClick={toggleTheme} // Continua funcionando igual, mas agora vem do Zustand!
+              onClick={toggleTheme}
               className="hidden text-neutral-400 transition-colors hover:text-white md:block"
-              aria-label="Toggle theme"
+              aria-label="Alternar tema"
             >
               {isDark ? <Sun size={20} /> : <Moon size={20} />}
             </button>
             <div className="hidden h-5 w-px bg-white/10 md:block"></div>
-            <button className="hidden items-center gap-2 text-sm font-medium transition-colors hover:text-neutral-300 md:flex">
-              <div className="flex h-8 w-8 items-center justify-center rounded-full border border-neutral-700 bg-neutral-800">
-                <User size={14} className="text-neutral-400" />
-              </div>
-            </button>
+
+            {/* User menu */}
+            <div className="relative hidden md:block" data-user-menu>
+              <button
+                onClick={() => setUserMenuOpen((v) => !v)}
+                className="flex items-center gap-2 text-sm font-medium transition-colors hover:text-neutral-300"
+              >
+                <div className="flex h-8 w-8 items-center justify-center rounded-full border border-neutral-700 bg-neutral-800">
+                  <User size={14} className="text-neutral-400" />
+                </div>
+                {user && (
+                  <span className="max-w-[100px] truncate text-neutral-300">{user.username}</span>
+                )}
+              </button>
+
+              {userMenuOpen && (
+                <div className="absolute right-0 top-12 w-48 rounded-xl border border-neutral-700 bg-neutral-900 py-2 shadow-xl">
+                  {user && (
+                    <div className="border-b border-neutral-800 px-4 pb-2 mb-1">
+                      <p className="text-xs font-medium text-neutral-300 truncate">{user.username}</p>
+                      <p className="text-xs text-neutral-500 truncate">{user.email}</p>
+                    </div>
+                  )}
+                  <button
+                    onClick={() => { logout(); setUserMenuOpen(false); }}
+                    className="flex w-full items-center gap-2 px-4 py-2 text-sm text-neutral-400 transition-colors hover:bg-neutral-800 hover:text-white"
+                  >
+                    <LogOut size={14} />
+                    Sair
+                  </button>
+                </div>
+              )}
+            </div>
 
             {/* Mobile: Search + Hamburger */}
             <button className="text-neutral-400 transition-colors hover:text-white md:hidden">
@@ -102,7 +144,7 @@ export function Header({ currentPage }: HeaderProps) {
             <button
               onClick={() => setMenuOpen((v) => !v)}
               className="text-neutral-400 transition-colors hover:text-white md:hidden"
-              aria-label="Toggle menu"
+              aria-label="Abrir menu"
             >
               {menuOpen ? <X size={22} /> : <Menu size={22} />}
             </button>
@@ -137,10 +179,8 @@ export function Header({ currentPage }: HeaderProps) {
             ))}
           </nav>
 
-          {/* Divider */}
           <div className="mb-4 h-px bg-white/10"></div>
 
-          {/* Bottom row: Theme toggle + User */}
           <div className="flex items-center justify-between">
             <button
               className="flex items-center gap-2 rounded-full border border-neutral-700 bg-neutral-800/60 px-4 py-2 text-sm font-medium text-neutral-300 transition-colors hover:bg-neutral-700 hover:text-white"
@@ -150,11 +190,12 @@ export function Header({ currentPage }: HeaderProps) {
               {isDark ? 'Modo Claro' : 'Modo Escuro'}
             </button>
 
-            <button className="flex items-center gap-2 rounded-full border border-neutral-700 bg-neutral-800/60 px-4 py-2 text-sm font-medium text-neutral-300 transition-colors hover:bg-neutral-700 hover:text-white">
-              <div className="flex h-5 w-5 items-center justify-center rounded-full bg-neutral-700">
-                <User size={12} className="text-neutral-400" />
-              </div>
-              Perfil
+            <button
+              onClick={() => { logout(); setMenuOpen(false); }}
+              className="flex items-center gap-2 rounded-full border border-neutral-700 bg-neutral-800/60 px-4 py-2 text-sm font-medium text-neutral-300 transition-colors hover:bg-neutral-700 hover:text-white"
+            >
+              <LogOut size={14} />
+              Sair
             </button>
           </div>
         </div>
