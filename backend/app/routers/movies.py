@@ -166,31 +166,49 @@ async def search_movies(
 
 @router.get("/{tmdb_id}", response_model=MovieResponse)
 async def get_movie(tmdb_id: int, db: Session = Depends(get_db)):
+    """Detalhes do filme (busca no banco primeiro, depois TMDB com cache)."""
     movie = db.query(Movie).filter(Movie.id == tmdb_id).first()
-    if movie:
+    # Se ja temos detalhes completos (runtime/budget indicam que o detalhe foi carregado)
+    if movie and movie.runtime is not None:
         return movie
 
     data = await tmdb.get_movie_details(tmdb_id)
 
-    movie = Movie(
-        id=data["id"],
-        title=data["title"],
-        original_title=data.get("original_title"),
-        poster_path=data.get("poster_path"),
-        backdrop_path=data.get("backdrop_path"),
-        overview=data.get("overview"),
-        release_year=_parse_year(data.get("release_date")),
-        tmdb_rating=data.get("vote_average"),
-        cached_at=datetime.utcnow(),
-    )
-    db.add(movie)
+    is_new = movie is None
+    if is_new:
+        movie = Movie(id=data["id"])
+        db.add(movie)
 
+    movie.title = data["title"]
+    movie.original_title = data.get("original_title")
+    movie.poster_path = data.get("poster_path")
+    movie.backdrop_path = data.get("backdrop_path")
+    movie.overview = data.get("overview")
+    movie.release_year = _parse_year(data.get("release_date"))
+    movie.tmdb_rating = data.get("vote_average")
+    movie.revenue = data.get("revenue")
+    movie.budget = data.get("budget")
+    movie.runtime = data.get("runtime")
+    movie.tagline = data.get("tagline")
+    movie.status = data.get("status")
+    movie.original_language = data.get("original_language")
+    movie.cached_at = datetime.utcnow()
+
+    # Garante que o Movie e persistido antes de inserir o vinculo em movie_genres
+    # (evita ForeignKeyViolation quando o INSERT do filho roda antes do pai)
+    db.flush()
+
+    # Associa generos sem duplicar
+    existing_genre_ids = {g.id for g in movie.genres}
     for genre_data in data.get("genres", []):
-        genre = db.query(Genre).filter(Genre.id == genre_data["id"]).first()
+        gid = genre_data["id"]
+        genre = db.query(Genre).filter(Genre.id == gid).first()
         if not genre:
-            genre = Genre(id=genre_data["id"], name=genre_data["name"])
+            genre = Genre(id=gid, name=genre_data["name"])
             db.add(genre)
-        db.add(MovieGenre(movie_id=movie.id, genre_id=genre.id))
+            db.flush()
+        if gid not in existing_genre_ids:
+            db.add(MovieGenre(movie_id=movie.id, genre_id=gid))
 
     db.commit()
     db.refresh(movie)

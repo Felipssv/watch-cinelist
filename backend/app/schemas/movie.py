@@ -1,14 +1,15 @@
-from pydantic import BaseModel
-from typing import Optional
+"""Schemas Pydantic para o dominio de filmes."""
 from datetime import datetime
+from typing import Optional
+
+from pydantic import BaseModel, ConfigDict
 
 
 class GenreSchema(BaseModel):
     id: int
     name: str
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class MovieBase(BaseModel):
@@ -32,9 +33,16 @@ class MovieSearchResponse(BaseModel):
 
 
 class MovieResponse(MovieBase):
+    """Resposta completa do filme, incluindo detalhes financeiros e relacionais."""
+
     backdrop_path: Optional[str] = None
+    runtime: Optional[int] = None
+    revenue: Optional[int] = None
+    budget: Optional[int] = None
+    tagline: Optional[str] = None
+    status: Optional[str] = None
+    original_language: Optional[str] = None
     genres: list[GenreSchema] = []
     cached_at: Optional[datetime] = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
