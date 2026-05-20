@@ -5,7 +5,8 @@ export interface ListMovie {
   id: number;
   title: string;
   poster_path: string | null;
-  tmdb_rating: number | null;
+  backdrop_path?: string | null;
+  tmdb_rating?: number | null;
 }
 
 type ListType = 'favorites' | 'watchlist' | 'watched';
