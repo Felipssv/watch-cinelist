@@ -1,17 +1,24 @@
+"""Configuracao do SQLAlchemy: engine, session factory e Base declarativa.
+
+Usa SQLAlchemy 2.0 em modo sincrono com psycopg2.
+"""
 from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker, declarative_base
-from dotenv import load_dotenv
-import os
+from sqlalchemy.orm import Session, declarative_base, sessionmaker
 
-load_dotenv()
+from app.config import settings
 
-DATABASE_URL = os.getenv("DATABASE_URL")
 
-engine = create_engine(DATABASE_URL)
+engine = create_engine(
+    settings.DATABASE_URL,
+    pool_pre_ping=True,
+    pool_recycle=3600,
+)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
-def get_db():
+
+def get_db() -> Session:
+    """Dependency do FastAPI que abre/fecha uma sessao por request."""
     db = SessionLocal()
     try:
         yield db
