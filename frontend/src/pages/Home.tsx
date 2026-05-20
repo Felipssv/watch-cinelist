@@ -1,65 +1,36 @@
-import { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom'; // <-- 1. Import do hook de navegação
+import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Header } from '../components/Header';
 import { Footer } from '../components/Footer';
 import { HeroSection } from '../components/HeroSection';
 import { MovieCard } from '../components/MovieCard';
+import { MovieModal } from '../components/MovieModal';
 import { ChevronRight, Loader2 } from 'lucide-react';
-import { MovieModal } from '../components/MovieModal'; 
 import { useThemeStore } from '../store/themeStore';
 import { useListStore } from '../store/listStore';
+import { useMovies } from '../hooks/useMovies';
 
 export default function Home() {
-  const { isDark } = useThemeStore(); 
+  const { isDark } = useThemeStore();
   const { addToList, removeFromList, isInList, watched } = useListStore();
-  
-  const navigate = useNavigate(); // <-- 2. Instanciando o navigate
+  const navigate = useNavigate();
 
-  const [movies, setMovies] = useState([]);
-  const [isLoading, setIsLoading] = useState(true);
-  const [selectedMovieId, setSelectedMovieId] = useState<string | null>(null);
+  const [selectedMovieId, setSelectedMovieId] = useState<number | null>(null);
 
-  useEffect(() => {
-    fetch('http://localhost:8000/movies')
-      .then(res => res.json())
-      .then(data => {
-        setMovies(data);
-        setIsLoading(false);
-      })
-      .catch(err => {
-        console.error("Erro ao buscar filmes:", err);
-        setIsLoading(false);
-      });
-  }, []);
+  const { data: movies = [], isLoading } = useMovies();
 
-  const featuredMovie = movies.length > 0 ? movies[0] : null;
-
-  const lastReturns = watched.map(movie => ({
-    originalId: movie.id,
-    id: `ID: ${movie.id}`,
-    title: movie.title,
-    rating: movie.tmdb_rating?.toFixed(1),
-    imageUrl: movie.poster_path ? `https://image.tmdb.org/t/p/w500${movie.poster_path}` : '',
-  }));
-
-  const trendingMovies = movies.slice(0, 5).map(movie => ({
-    originalId: movie.id,
-    id: `ID: ${movie.id}`,
-    title: movie.title,
-    rating: movie.tmdb_rating?.toFixed(1),
-    imageUrl: movie.poster_path ? `https://image.tmdb.org/t/p/w500${movie.poster_path}` : '',
-  }));
-
-  const newReleases = movies.slice(5, 10).map(movie => ({
-    originalId: movie.id,
-    id: `ID: ${movie.id}`,
-    title: movie.title,
-    rating: movie.tmdb_rating?.toFixed(1),
-    imageUrl: movie.poster_path ? `https://image.tmdb.org/t/p/w500${movie.poster_path}` : '',
-  }));
+  const featuredMovie = movies[0] ?? null;
+  const trendingMovies = movies.slice(0, 10);
+  const newReleases = movies.slice(10, 20);
 
   return (
-    <div className={`min-h-screen ${isDark ? 'bg-neutral-950 selection:bg-red-900 selection:text-white' : 'bg-white selection:bg-red-100 selection:text-red-900'}`}>
+    <div
+      className={`min-h-screen ${
+        isDark
+          ? 'bg-neutral-950 selection:bg-red-900 selection:text-white'
+          : 'bg-white selection:bg-red-100 selection:text-red-900'
+      }`}
+    >
       <Header currentPage="home" />
 
       <main>
@@ -72,14 +43,18 @@ export default function Home() {
             {featuredMovie && (
               <HeroSection
                 title={featuredMovie.title}
-                description={featuredMovie.overview || "Sinopse não disponível."}
-                imageUrl={featuredMovie.backdrop_path ? `https://image.tmdb.org/t/p/original${featuredMovie.backdrop_path}` : ""}
+                description={featuredMovie.overview ?? 'Sinopse nao disponivel.'}
+                imageUrl={
+                  featuredMovie.backdrop_path
+                    ? `https://image.tmdb.org/t/p/original${featuredMovie.backdrop_path}`
+                    : ''
+                }
                 tag="Em Destaque"
-                genre={featuredMovie.genres && featuredMovie.genres.length > 0 ? featuredMovie.genres[0].name : "Filme"}
-                rating={featuredMovie.tmdb_rating?.toFixed(1) || "N/A"}
-                year={featuredMovie.release_year?.toString() || ""}
+                genre={featuredMovie.genres?.[0]?.name ?? 'Filme'}
+                rating={featuredMovie.tmdb_rating?.toFixed(1) ?? 'N/A'}
+                year={featuredMovie.release_year?.toString() ?? ''}
                 isDark={isDark}
-                onPlayClick={() => setSelectedMovieId(featuredMovie.id.toString())}
+                onPlayClick={() => setSelectedMovieId(featuredMovie.id)}
                 isInList={isInList('watchlist', featuredMovie.id)}
                 onListClick={() => {
                   if (isInList('watchlist', featuredMovie.id)) {
@@ -92,137 +67,166 @@ export default function Home() {
             )}
 
             <div className="mx-auto max-w-7xl px-6 py-12">
-              {/* Recently Watched Section */}
               <section className="mb-20">
-                <div className="mb-8 flex items-end justify-between">
-                  <div>
-                    <h3 className={`mb-2 text-2xl font-bold tracking-tight ${isDark ? 'text-white' : 'text-neutral-900'}`}>Assistidos Recentemente</h3>
-                    <p className="text-sm font-medium text-neutral-500">
-                      Os filmes que você assistiu nos últimos dias.
-                    </p>
-                  </div>
-                  {/* 3. Redireciona para Minha Lista */}
-                  <button 
-                    onClick={() => navigate('/minha-lista', { state: { tab: 'watched' } })}
-                    className={`group flex items-center gap-1 text-sm font-medium transition-colors ${isDark ? 'text-neutral-400 hover:text-white' : 'text-neutral-600 hover:text-neutral-900'}`}
-                  >
-                    Ver todas{' '}
-                    <ChevronRight size={16} className="transition-transform group-hover:translate-x-1" />
-                  </button>
-                </div>
-
-                {lastReturns.length > 0 ? (
-                  <div className="hide-scrollbar snap-x overflow-x-auto pb-10">
-                    <div className="flex gap-6">
-                      {lastReturns.map((movie) => (
-                        <div key={movie.id} className="snap-start pt-2">
-                          <MovieCard
-                            title={movie.title}
-                            rating={movie.rating}
-                            id={movie.id}
-                            imageUrl={movie.imageUrl}
-                            isDark={isDark}
-                            onClick={() => setSelectedMovieId(movie.originalId.toString())}
-                          />
-                        </div>
-                      ))}
-                    </div>
-                  </div>
+                <SectionHeader
+                  title="Assistidos Recentemente"
+                  subtitle="Os filmes que voce assistiu nos ultimos dias."
+                  isDark={isDark}
+                  onViewAll={() => navigate('/minha-lista', { state: { tab: 'watched' } })}
+                />
+                {watched.length > 0 ? (
+                  <MovieRow
+                    movies={watched.map((m) => ({
+                      id: m.id,
+                      title: m.title,
+                      rating: m.tmdb_rating?.toFixed(1),
+                      imageUrl: m.poster_path
+                        ? `https://image.tmdb.org/t/p/w500${m.poster_path}`
+                        : '',
+                    }))}
+                    isDark={isDark}
+                    onSelect={setSelectedMovieId}
+                  />
                 ) : (
-                  <div className={`rounded-lg border-2 border-dashed p-8 text-center ${isDark ? 'border-neutral-700 bg-neutral-900' : 'border-neutral-200 bg-neutral-50'}`}>
-                    <p className={`text-sm font-medium ${isDark ? 'text-neutral-400' : 'text-neutral-600'}`}>
-                      Você ainda não marcou nenhum filme como assistido.
-                    </p>
-                  </div>
+                  <EmptyRow
+                    message="Voce ainda nao marcou nenhum filme como assistido."
+                    isDark={isDark}
+                  />
                 )}
               </section>
 
-              {/* Trending Section */}
               <section className="mb-20">
-                <div className="mb-8 flex items-end justify-between">
-                  <div>
-                    <h3 className={`mb-2 text-2xl font-bold tracking-tight ${isDark ? 'text-white' : 'text-neutral-900'}`}>Em Alta</h3>
-                    <p className="text-sm font-medium text-neutral-500">
-                      Os filmes mais populares do momento.
-                    </p>
-                  </div>
-                  {/* 4. Redireciona para Filmes com o state "popular" */}
-                  <button 
-                    onClick={() => navigate('/filmes', { state: { filter: 'popular' } })}
-                    className={`group flex items-center gap-1 text-sm font-medium transition-colors ${isDark ? 'text-neutral-400 hover:text-white' : 'text-neutral-600 hover:text-neutral-900'}`}
-                  >
-                    Ver todas{' '}
-                    <ChevronRight size={16} className="transition-transform group-hover:translate-x-1" />
-                  </button>
-                </div>
-
-                <div className="hide-scrollbar snap-x overflow-x-auto pb-10">
-                  <div className="flex gap-6">
-                    {trendingMovies.map((movie) => (
-                      <div key={movie.id} className="snap-start pt-2">
-                        <MovieCard
-                          title={movie.title}
-                          rating={movie.rating}
-                          id={movie.id}
-                          imageUrl={movie.imageUrl}
-                          isDark={isDark}
-                          onClick={() => setSelectedMovieId(movie.originalId.toString())}
-                        />
-                      </div>
-                    ))}
-                  </div>
-                </div>
+                <SectionHeader
+                  title="Em Alta"
+                  subtitle="Os filmes mais populares do momento."
+                  isDark={isDark}
+                  onViewAll={() => navigate('/trending')}
+                />
+                <MovieRow
+                  movies={trendingMovies.map((m) => ({
+                    id: m.id,
+                    title: m.title,
+                    rating: m.tmdb_rating?.toFixed(1),
+                    imageUrl: m.poster_path
+                      ? `https://image.tmdb.org/t/p/w500${m.poster_path}`
+                      : '',
+                  }))}
+                  isDark={isDark}
+                  onSelect={setSelectedMovieId}
+                />
               </section>
 
-              {/* New Releases Section */}
               <section className="mb-20">
-                <div className="mb-8 flex items-end justify-between">
-                  <div>
-                    <h3 className={`mb-2 text-2xl font-bold tracking-tight ${isDark ? 'text-white' : 'text-neutral-900'}`}>Lançamentos</h3>
-                    <p className="text-sm font-medium text-neutral-500">
-                      Os filmes mais recentes que chegaram.
-                    </p>
-                  </div>
-                  {/* 5. Redireciona para Filmes com o state "now_playing" */}
-                  <button 
-                    onClick={() => navigate('/filmes', { state: { filter: 'now_playing' } })}
-                    className={`group flex items-center gap-1 text-sm font-medium transition-colors ${isDark ? 'text-neutral-400 hover:text-white' : 'text-neutral-600 hover:text-neutral-900'}`}
-                  >
-                    Ver todas{' '}
-                    <ChevronRight size={16} className="transition-transform group-hover:translate-x-1" />
-                  </button>
-                </div>
-
-                <div className="hide-scrollbar snap-x overflow-x-auto pb-10">
-                  <div className="flex gap-6">
-                    {newReleases.map((movie) => (
-                      <div key={movie.id} className="snap-start pt-2">
-                        <MovieCard
-                          title={movie.title}
-                          rating={movie.rating}
-                          id={movie.id}
-                          imageUrl={movie.imageUrl}
-                          isDark={isDark}
-                          onClick={() => setSelectedMovieId(movie.originalId.toString())}
-                        />
-                      </div>
-                    ))}
-                  </div>
-                </div>
+                <SectionHeader
+                  title="Lancamentos"
+                  subtitle="Os filmes mais recentes que chegaram."
+                  isDark={isDark}
+                  onViewAll={() => navigate('/filmes', { state: { filter: 'now_playing' } })}
+                />
+                <MovieRow
+                  movies={newReleases.map((m) => ({
+                    id: m.id,
+                    title: m.title,
+                    rating: m.tmdb_rating?.toFixed(1),
+                    imageUrl: m.poster_path
+                      ? `https://image.tmdb.org/t/p/w500${m.poster_path}`
+                      : '',
+                  }))}
+                  isDark={isDark}
+                  onSelect={setSelectedMovieId}
+                />
               </section>
             </div>
           </>
         )}
       </main>
-      
+
       <Footer />
 
-      {selectedMovieId && (
-        <MovieModal 
-          movieId={selectedMovieId} 
-          onClose={() => setSelectedMovieId(null)} 
-        />
+      {selectedMovieId !== null && (
+        <MovieModal movieId={selectedMovieId} onClose={() => setSelectedMovieId(null)} />
       )}
+    </div>
+  );
+}
+
+interface SectionHeaderProps {
+  title: string;
+  subtitle: string;
+  isDark: boolean;
+  onViewAll: () => void;
+}
+
+function SectionHeader({ title, subtitle, isDark, onViewAll }: SectionHeaderProps) {
+  return (
+    <div className="mb-8 flex items-end justify-between">
+      <div>
+        <h3
+          className={`mb-1 text-2xl font-bold tracking-tight ${isDark ? 'text-white' : 'text-neutral-900'}`}
+        >
+          {title}
+        </h3>
+        <p className="text-sm font-medium text-neutral-500">{subtitle}</p>
+      </div>
+      <button
+        onClick={onViewAll}
+        className={`group flex items-center gap-1 text-sm font-medium transition-colors ${
+          isDark ? 'text-neutral-400 hover:text-white' : 'text-neutral-500 hover:text-neutral-900'
+        }`}
+      >
+        Ver todas{' '}
+        <ChevronRight size={16} className="transition-transform group-hover:translate-x-1" />
+      </button>
+    </div>
+  );
+}
+
+interface MovieRowItem {
+  id: number;
+  title: string;
+  rating?: string;
+  imageUrl: string;
+}
+
+function MovieRow({
+  movies,
+  isDark,
+  onSelect,
+}: {
+  movies: MovieRowItem[];
+  isDark: boolean;
+  onSelect: (id: number) => void;
+}) {
+  return (
+    <div className="hide-scrollbar snap-x overflow-x-auto pb-10">
+      <div className="flex gap-6">
+        {movies.map((movie) => (
+          <div key={movie.id} className="snap-start pt-2">
+            <MovieCard
+              title={movie.title}
+              rating={movie.rating}
+              movieId={movie.id}
+              imageUrl={movie.imageUrl}
+              isDark={isDark}
+              onClick={() => onSelect(movie.id)}
+            />
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function EmptyRow({ message, isDark }: { message: string; isDark: boolean }) {
+  return (
+    <div
+      className={`rounded-xl border-2 border-dashed p-8 text-center ${
+        isDark ? 'border-neutral-800 bg-neutral-900' : 'border-neutral-200 bg-neutral-50'
+      }`}
+    >
+      <p className={`text-sm font-medium ${isDark ? 'text-neutral-500' : 'text-neutral-500'}`}>
+        {message}
+      </p>
     </div>
   );
 }
