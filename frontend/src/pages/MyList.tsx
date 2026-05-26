@@ -6,12 +6,12 @@ import { MovieCard } from '../components/MovieCard';
 import { MovieModal } from '../components/MovieModal';
 import { ReviewModal } from '../components/ReviewModal';
 import { StarRating } from '../components/StarRating';
-import { Search, Trash2, PenLine, Calendar } from 'lucide-react';
+import { Search, Trash2, PenLine, Calendar, Loader2, AlertCircle } from 'lucide-react';
 import { useThemeStore } from '../store/themeStore';
-import { useListStore } from '../store/listStore';
-import type { ListMovie } from '../store/listStore';
-import { useReviewStore } from '../store/reviewStore';
-import type { Review } from '../store/reviewStore';
+import { useMovieLists } from '../hooks/useWatchlist';
+import type { ListMovie } from '../types/watchlist';
+import { useMyReviews, useDeleteReview } from '../hooks/useReviews';
+import type { Review } from '../types/review';
 
 type ListTab = 'favorites' | 'watchlist' | 'watched' | 'reviews';
 
@@ -31,10 +31,30 @@ export default function MyList() {
   );
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedMovieId, setSelectedMovieId] = useState<number | null>(null);
-  const [reviewTarget, setReviewTarget] = useState<{ id: number; title: string } | null>(null);
+  const [reviewTarget, setReviewTarget] = useState<Review | null>(null);
 
-  const { favorites, watchlist, watched, removeFromList } = useListStore();
-  const { reviews, removeReview } = useReviewStore();
+  const {
+    favorites,
+    watchlist,
+    watched,
+    removeFromList,
+    isLoading: listsLoading,
+    isError: listsError,
+    refetch: refetchLists,
+  } = useMovieLists();
+  const {
+    data: reviewsData,
+    isLoading: reviewsLoading,
+    isError: reviewsError,
+    refetch: refetchReviews,
+  } = useMyReviews();
+  const deleteReview = useDeleteReview();
+
+  const reviews = reviewsData?.results ?? [];
+
+  const handleDeleteReview = (review: Review) => {
+    deleteReview.mutate({ reviewId: review.id, movieId: review.movie_id });
+  };
 
   useEffect(() => {
     window.scrollTo(0, 0);
@@ -51,14 +71,14 @@ export default function MyList() {
   );
 
   const filteredReviews = reviews.filter((r) =>
-    r.movieTitle.toLowerCase().includes(searchQuery.toLowerCase())
+    r.movie.title.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
   const getTabCount = (tab: ListTab) => {
     if (tab === 'favorites') return favorites.length;
     if (tab === 'watchlist') return watchlist.length;
     if (tab === 'watched') return watched.length;
-    if (tab === 'reviews') return reviews.length;
+    if (tab === 'reviews') return reviewsData?.total ?? reviews.length;
     return 0;
   };
 
@@ -164,8 +184,12 @@ export default function MyList() {
               reviews={filteredReviews}
               isDark={isDark}
               searchQuery={searchQuery}
-              onEdit={(id, title) => setReviewTarget({ id, title })}
-              onDelete={removeReview}
+              isLoading={reviewsLoading}
+              isError={reviewsError}
+              onRetry={() => refetchReviews()}
+              deletingId={deleteReview.isPending ? deleteReview.variables?.reviewId : undefined}
+              onEdit={(review) => setReviewTarget(review)}
+              onDelete={handleDeleteReview}
               onMovieClick={setSelectedMovieId}
             />
           ) : (
@@ -174,6 +198,9 @@ export default function MyList() {
               isDark={isDark}
               searchQuery={searchQuery}
               listTab={activeTab}
+              isLoading={listsLoading}
+              isError={listsError}
+              onRetry={() => refetchLists()}
               onRemove={(id) => removeFromList(activeTab as 'favorites' | 'watchlist' | 'watched', id)}
               onMovieClick={setSelectedMovieId}
             />
@@ -189,8 +216,9 @@ export default function MyList() {
 
       {reviewTarget && (
         <ReviewModal
-          movieId={reviewTarget.id}
-          movieTitle={reviewTarget.title}
+          movieId={reviewTarget.movie_id}
+          movieTitle={reviewTarget.movie.title}
+          existingReview={reviewTarget}
           onClose={() => setReviewTarget(null)}
         />
       )}
@@ -203,11 +231,51 @@ interface MoviesGridProps {
   isDark: boolean;
   searchQuery: string;
   listTab: 'favorites' | 'watchlist' | 'watched';
+  isLoading: boolean;
+  isError: boolean;
+  onRetry: () => void;
   onRemove: (id: number) => void;
   onMovieClick: (id: number) => void;
 }
 
-function MoviesGrid({ movies, isDark, searchQuery, onRemove, onMovieClick }: MoviesGridProps) {
+function MoviesGrid({
+  movies,
+  isDark,
+  searchQuery,
+  isLoading,
+  isError,
+  onRetry,
+  onRemove,
+  onMovieClick,
+}: MoviesGridProps) {
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center py-20">
+        <Loader2 size={32} className={`animate-spin ${isDark ? 'text-neutral-400' : 'text-neutral-500'}`} />
+      </div>
+    );
+  }
+
+  if (isError) {
+    return (
+      <div
+        className={`flex flex-col items-center justify-center py-20 text-center ${
+          isDark ? 'text-neutral-400' : 'text-neutral-600'
+        }`}
+      >
+        <AlertCircle size={48} className="mb-4 text-red-500 opacity-70" />
+        <h3 className="mb-2 text-xl font-semibold">Erro ao carregar sua lista</h3>
+        <p className="mb-4 text-sm">Nao foi possivel buscar seus filmes.</p>
+        <button
+          onClick={onRetry}
+          className="rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-red-700"
+        >
+          Tentar novamente
+        </button>
+      </div>
+    );
+  }
+
   if (movies.length === 0) {
     return (
       <div
@@ -266,12 +334,55 @@ interface ReviewsGridProps {
   reviews: Review[];
   isDark: boolean;
   searchQuery: string;
-  onEdit: (id: number, title: string) => void;
-  onDelete: (id: number) => void;
+  isLoading: boolean;
+  isError: boolean;
+  onRetry: () => void;
+  deletingId?: string;
+  onEdit: (review: Review) => void;
+  onDelete: (review: Review) => void;
   onMovieClick: (id: number) => void;
 }
 
-function ReviewsGrid({ reviews, isDark, searchQuery, onEdit, onDelete, onMovieClick }: ReviewsGridProps) {
+function ReviewsGrid({
+  reviews,
+  isDark,
+  searchQuery,
+  isLoading,
+  isError,
+  onRetry,
+  deletingId,
+  onEdit,
+  onDelete,
+  onMovieClick,
+}: ReviewsGridProps) {
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center py-20">
+        <Loader2 size={32} className={`animate-spin ${isDark ? 'text-neutral-400' : 'text-neutral-500'}`} />
+      </div>
+    );
+  }
+
+  if (isError) {
+    return (
+      <div
+        className={`flex flex-col items-center justify-center py-20 text-center ${
+          isDark ? 'text-neutral-400' : 'text-neutral-600'
+        }`}
+      >
+        <AlertCircle size={48} className="mb-4 text-red-500 opacity-70" />
+        <h3 className="mb-2 text-xl font-semibold">Erro ao carregar reviews</h3>
+        <p className="mb-4 text-sm">Nao foi possivel buscar suas reviews.</p>
+        <button
+          onClick={onRetry}
+          className="rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-red-700"
+        >
+          Tentar novamente
+        </button>
+      </div>
+    );
+  }
+
   if (reviews.length === 0) {
     return (
       <div
@@ -294,76 +405,85 @@ function ReviewsGrid({ reviews, isDark, searchQuery, onEdit, onDelete, onMovieCl
 
   return (
     <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-      {reviews.map((review) => (
-        <div
-          key={review.movieId}
-          className={`group relative rounded-xl border p-5 transition-shadow hover:shadow-lg ${
-            isDark
-              ? 'border-neutral-800 bg-neutral-900 hover:border-neutral-700'
-              : 'border-neutral-200 bg-white hover:border-neutral-300'
-          }`}
-        >
-          <div className="mb-3 flex items-start justify-between gap-3">
-            <button
-              onClick={() => onMovieClick(review.movieId)}
-              className={`text-left text-base font-semibold leading-tight transition-colors hover:text-red-500 ${
-                isDark ? 'text-white' : 'text-neutral-900'
-              }`}
-            >
-              {review.movieTitle}
-            </button>
-            <div className="flex shrink-0 gap-1 opacity-0 transition-opacity group-hover:opacity-100">
+      {reviews.map((review) => {
+        const isDeleting = deletingId === review.id;
+        return (
+          <div
+            key={review.id}
+            className={`group relative rounded-xl border p-5 transition-shadow hover:shadow-lg ${
+              isDeleting ? 'opacity-50' : ''
+            } ${
+              isDark
+                ? 'border-neutral-800 bg-neutral-900 hover:border-neutral-700'
+                : 'border-neutral-200 bg-white hover:border-neutral-300'
+            }`}
+          >
+            <div className="mb-3 flex items-start justify-between gap-3">
               <button
-                onClick={() => onEdit(review.movieId, review.movieTitle)}
-                className={`rounded-lg p-1.5 transition-colors ${
-                  isDark
-                    ? 'text-neutral-400 hover:bg-neutral-800 hover:text-white'
-                    : 'text-neutral-400 hover:bg-neutral-100 hover:text-neutral-900'
+                onClick={() => onMovieClick(review.movie_id)}
+                className={`text-left text-base font-semibold leading-tight transition-colors hover:text-red-500 ${
+                  isDark ? 'text-white' : 'text-neutral-900'
                 }`}
-                aria-label="Editar review"
               >
-                <PenLine size={15} />
+                {review.movie.title}
               </button>
-              <button
-                onClick={() => onDelete(review.movieId)}
-                className={`rounded-lg p-1.5 transition-colors ${
-                  isDark
-                    ? 'text-neutral-400 hover:bg-red-900/30 hover:text-red-400'
-                    : 'text-neutral-400 hover:bg-red-50 hover:text-red-500'
+              <div className="flex shrink-0 gap-1 opacity-0 transition-opacity group-hover:opacity-100">
+                <button
+                  onClick={() => onEdit(review)}
+                  disabled={isDeleting}
+                  className={`rounded-lg p-1.5 transition-colors disabled:opacity-40 ${
+                    isDark
+                      ? 'text-neutral-400 hover:bg-neutral-800 hover:text-white'
+                      : 'text-neutral-400 hover:bg-neutral-100 hover:text-neutral-900'
+                  }`}
+                  aria-label="Editar review"
+                >
+                  <PenLine size={15} />
+                </button>
+                <button
+                  onClick={() => onDelete(review)}
+                  disabled={isDeleting}
+                  className={`rounded-lg p-1.5 transition-colors disabled:opacity-40 ${
+                    isDark
+                      ? 'text-neutral-400 hover:bg-red-900/30 hover:text-red-400'
+                      : 'text-neutral-400 hover:bg-red-50 hover:text-red-500'
+                  }`}
+                  aria-label="Excluir review"
+                >
+                  {isDeleting ? <Loader2 size={15} className="animate-spin" /> : <Trash2 size={15} />}
+                </button>
+              </div>
+            </div>
+
+            {review.rating !== null && (
+              <div className="mb-3">
+                <StarRating value={review.rating} max={5} size={16} readonly isDark={isDark} />
+              </div>
+            )}
+
+            {review.content && (
+              <p
+                className={`mb-4 text-sm leading-relaxed line-clamp-3 ${
+                  isDark ? 'text-neutral-400' : 'text-neutral-600'
                 }`}
-                aria-label="Excluir review"
               >
-                <Trash2 size={15} />
-              </button>
+                {review.content}
+              </p>
+            )}
+
+            <div className={`flex items-center gap-1.5 text-xs ${isDark ? 'text-neutral-600' : 'text-neutral-400'}`}>
+              <Calendar size={11} />
+              <span>
+                {new Date(review.updated_at).toLocaleDateString('pt-BR', {
+                  day: '2-digit',
+                  month: 'short',
+                  year: 'numeric',
+                })}
+              </span>
             </div>
           </div>
-
-          <div className="mb-3">
-            <StarRating value={review.rating} max={10} size={16} readonly isDark={isDark} />
-          </div>
-
-          {review.text && (
-            <p
-              className={`mb-4 text-sm leading-relaxed line-clamp-3 ${
-                isDark ? 'text-neutral-400' : 'text-neutral-600'
-              }`}
-            >
-              {review.text}
-            </p>
-          )}
-
-          <div className={`flex items-center gap-1.5 text-xs ${isDark ? 'text-neutral-600' : 'text-neutral-400'}`}>
-            <Calendar size={11} />
-            <span>
-              {new Date(review.updatedAt).toLocaleDateString('pt-BR', {
-                day: '2-digit',
-                month: 'short',
-                year: 'numeric',
-              })}
-            </span>
-          </div>
-        </div>
-      ))}
+        );
+      })}
     </div>
   );
 }

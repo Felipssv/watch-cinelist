@@ -1,23 +1,47 @@
 import { useState, useEffect } from 'react';
-import { X, Trash2, PenLine } from 'lucide-react';
+import { X, Trash2, PenLine, Loader2, AlertCircle } from 'lucide-react';
 import { useThemeStore } from '../store/themeStore';
-import { useReviewStore } from '../store/reviewStore';
 import { StarRating } from './StarRating';
+import {
+  useCreateReview,
+  useUpdateReview,
+  useDeleteReview,
+} from '../hooks/useReviews';
+import { extractErrorMessage } from '../hooks/useAuth';
+import type { Review } from '../types/review';
 
 interface ReviewModalProps {
   movieId: number;
   movieTitle: string;
+  /** Review existente do usuario para este filme, se houver. */
+  existingReview?: Review | null;
   onClose: () => void;
 }
 
-export function ReviewModal({ movieId, movieTitle, onClose }: ReviewModalProps) {
+export function ReviewModal({
+  movieId,
+  movieTitle,
+  existingReview,
+  onClose,
+}: ReviewModalProps) {
   const { isDark } = useThemeStore();
-  const { getReview, upsertReview, removeReview } = useReviewStore();
 
-  const existing = getReview(movieId);
-  const [rating, setRating] = useState(existing?.rating ?? 5);
-  const [text, setText] = useState(existing?.text ?? '');
+  const createReview = useCreateReview();
+  const updateReview = useUpdateReview();
+  const deleteReview = useDeleteReview();
+
+  const [rating, setRating] = useState(existingReview?.rating ?? 3);
+  const [text, setText] = useState(existingReview?.content ?? '');
   const [visible, setVisible] = useState(false);
+
+  const isEditing = !!existingReview;
+  const isSaving = createReview.isPending || updateReview.isPending;
+  const isDeleting = deleteReview.isPending;
+  const isBusy = isSaving || isDeleting;
+
+  const mutationError =
+    createReview.error ?? updateReview.error ?? deleteReview.error;
+  const errorMessage = mutationError ? extractErrorMessage(mutationError) : null;
 
   useEffect(() => {
     setVisible(true);
@@ -26,22 +50,46 @@ export function ReviewModal({ movieId, movieTitle, onClose }: ReviewModalProps) 
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const handleClose = () => {
+    if (isBusy) return;
     setVisible(false);
     onClose();
   };
 
   const handleSave = () => {
-    if (!text.trim() && rating === 0) return;
-    upsertReview({ movieId, movieTitle, rating, text: text.trim() });
-    handleClose();
+    const content = text.trim();
+    // Backend exige content (min_length=1); rating ja esta na escala 1-5.
+    if (!content) return;
+
+    const input = { content, rating, is_public: true };
+
+    if (isEditing) {
+      updateReview.mutate(
+        { reviewId: existingReview!.id, input },
+        { onSuccess: () => handleCloseAfterMutation() }
+      );
+    } else {
+      createReview.mutate(
+        { movieId, input },
+        { onSuccess: () => handleCloseAfterMutation() }
+      );
+    }
   };
 
   const handleDelete = () => {
-    removeReview(movieId);
-    handleClose();
+    if (!isEditing) return;
+    deleteReview.mutate(
+      { reviewId: existingReview!.id, movieId },
+      { onSuccess: () => handleCloseAfterMutation() }
+    );
+  };
+
+  const handleCloseAfterMutation = () => {
+    setVisible(false);
+    onClose();
   };
 
   if (!visible) return null;
@@ -67,7 +115,7 @@ export function ReviewModal({ movieId, movieTitle, onClose }: ReviewModalProps) 
               </div>
               <div>
                 <h2 className={`text-base font-semibold ${isDark ? 'text-white' : 'text-neutral-900'}`}>
-                  {existing ? 'Editar review' : 'Escrever review'}
+                  {isEditing ? 'Editar review' : 'Escrever review'}
                 </h2>
                 <p className={`text-xs ${isDark ? 'text-neutral-500' : 'text-neutral-400'}`} title={movieTitle}>
                   {movieTitle.length > 40 ? `${movieTitle.slice(0, 40)}…` : movieTitle}
@@ -76,13 +124,21 @@ export function ReviewModal({ movieId, movieTitle, onClose }: ReviewModalProps) 
             </div>
             <button
               onClick={handleClose}
-              className={`rounded-full p-1.5 transition-colors ${isDark ? 'text-neutral-400 hover:bg-neutral-800 hover:text-white' : 'text-neutral-400 hover:bg-neutral-100 hover:text-neutral-900'}`}
+              disabled={isBusy}
+              className={`rounded-full p-1.5 transition-colors disabled:opacity-40 ${isDark ? 'text-neutral-400 hover:bg-neutral-800 hover:text-white' : 'text-neutral-400 hover:bg-neutral-100 hover:text-neutral-900'}`}
             >
               <X size={18} />
             </button>
           </div>
 
           <div className="px-6 py-5 space-y-5">
+            {errorMessage && (
+              <div className="flex items-start gap-2 rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-400">
+                <AlertCircle size={16} className="mt-0.5 shrink-0" />
+                <span>{errorMessage}</span>
+              </div>
+            )}
+
             <div>
               <p className={`mb-2 text-sm font-medium ${isDark ? 'text-neutral-300' : 'text-neutral-700'}`}>
                 Sua nota
@@ -90,7 +146,7 @@ export function ReviewModal({ movieId, movieTitle, onClose }: ReviewModalProps) 
               <StarRating
                 value={rating}
                 onChange={setRating}
-                max={10}
+                max={5}
                 size={24}
                 isDark={isDark}
               />
@@ -109,7 +165,8 @@ export function ReviewModal({ movieId, movieTitle, onClose }: ReviewModalProps) 
                 onChange={(e) => setText(e.target.value)}
                 placeholder="Escreva sua opiniao sobre o filme..."
                 rows={5}
-                className={`w-full resize-none rounded-lg border px-4 py-3 text-sm leading-relaxed transition-colors focus:outline-none focus:ring-2 focus:ring-red-500/40 ${
+                disabled={isBusy}
+                className={`w-full resize-none rounded-lg border px-4 py-3 text-sm leading-relaxed transition-colors focus:outline-none focus:ring-2 focus:ring-red-500/40 disabled:opacity-60 ${
                   isDark
                     ? 'border-neutral-700 bg-neutral-800 text-white placeholder-neutral-500'
                     : 'border-neutral-300 bg-neutral-50 text-neutral-900 placeholder-neutral-400'
@@ -119,12 +176,13 @@ export function ReviewModal({ movieId, movieTitle, onClose }: ReviewModalProps) 
           </div>
 
           <div className={`flex items-center justify-between border-t px-6 py-4 ${isDark ? 'border-neutral-800' : 'border-neutral-100'}`}>
-            {existing ? (
+            {isEditing ? (
               <button
                 onClick={handleDelete}
-                className={`flex items-center gap-1.5 text-sm font-medium transition-colors ${isDark ? 'text-red-400 hover:text-red-300' : 'text-red-500 hover:text-red-600'}`}
+                disabled={isBusy}
+                className={`flex items-center gap-1.5 text-sm font-medium transition-colors disabled:opacity-40 ${isDark ? 'text-red-400 hover:text-red-300' : 'text-red-500 hover:text-red-600'}`}
               >
-                <Trash2 size={15} />
+                {isDeleting ? <Loader2 size={15} className="animate-spin" /> : <Trash2 size={15} />}
                 Excluir review
               </button>
             ) : (
@@ -133,7 +191,8 @@ export function ReviewModal({ movieId, movieTitle, onClose }: ReviewModalProps) 
             <div className="flex items-center gap-3">
               <button
                 onClick={handleClose}
-                className={`rounded-lg px-4 py-2 text-sm font-medium transition-colors ${
+                disabled={isBusy}
+                className={`rounded-lg px-4 py-2 text-sm font-medium transition-colors disabled:opacity-40 ${
                   isDark ? 'text-neutral-400 hover:text-white' : 'text-neutral-600 hover:text-neutral-900'
                 }`}
               >
@@ -141,9 +200,10 @@ export function ReviewModal({ movieId, movieTitle, onClose }: ReviewModalProps) 
               </button>
               <button
                 onClick={handleSave}
-                disabled={!text.trim() && rating === 0}
-                className="rounded-lg bg-red-600 px-5 py-2 text-sm font-semibold text-white transition-colors hover:bg-red-700 disabled:opacity-40 disabled:cursor-not-allowed"
+                disabled={!text.trim() || isBusy}
+                className="flex items-center gap-2 rounded-lg bg-red-600 px-5 py-2 text-sm font-semibold text-white transition-colors hover:bg-red-700 disabled:opacity-40 disabled:cursor-not-allowed"
               >
+                {isSaving && <Loader2 size={15} className="animate-spin" />}
                 Salvar
               </button>
             </div>

@@ -24,7 +24,7 @@ export function useLogin() {
   return useMutation({
     mutationFn: (payload: LoginPayload) => loginUser(payload),
     onSuccess: (data) => {
-      login(data.access_token, data.user);
+      login(data.access_token, data.user, data.refresh_token);
       navigate('/');
     },
   });

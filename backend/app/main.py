@@ -5,7 +5,7 @@ from sqlalchemy import text
 
 from app.config import settings
 from app.database import engine
-from app.routers import auth, movies, users
+from app.routers import auth, movies, reviews, users, watchlist
 
 app = FastAPI(
     title="CineList API",
@@ -25,6 +25,8 @@ app.add_middleware(
 app.include_router(auth.router)
 app.include_router(users.router)
 app.include_router(movies.router)
+app.include_router(reviews.router)
+app.include_router(watchlist.router)
 
 
 @app.get("/", tags=["meta"])

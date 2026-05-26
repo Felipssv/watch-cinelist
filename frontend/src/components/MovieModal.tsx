@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react';
 import { X, Loader2, Heart, ListPlus, Check, PenLine, Star } from 'lucide-react';
 import { useThemeStore } from '../store/themeStore';
-import { useListStore } from '../store/listStore';
-import { useReviewStore } from '../store/reviewStore';
+import { useMovieLists } from '../hooks/useWatchlist';
 import { useMovieDetail } from '../hooks/useMovies';
+import { useMyReviews } from '../hooks/useReviews';
 import { ReviewModal } from './ReviewModal';
 
 interface MovieModalProps {
@@ -13,19 +13,22 @@ interface MovieModalProps {
 
 export function MovieModal({ movieId, onClose }: MovieModalProps) {
   const { isDark } = useThemeStore();
-  const { addToList, removeFromList, isInList } = useListStore();
-  const { getReview, hasReview } = useReviewStore();
+  const { isInList, toggleList, isMutating } = useMovieLists();
 
   const [showModal, setShowModal] = useState(false);
   const [showReviewModal, setShowReviewModal] = useState(false);
 
   const numericId = typeof movieId === 'string' ? parseInt(movieId, 10) : movieId;
 
+  const { data: myReviews } = useMyReviews();
+  const review = numericId
+    ? myReviews?.results.find((r) => r.movie_id === numericId)
+    : undefined;
+  const reviewExists = !!review;
+
   const isFavorite = numericId ? isInList('favorites', numericId) : false;
   const isInWatchlist = numericId ? isInList('watchlist', numericId) : false;
   const isWatched = numericId ? isInList('watched', numericId) : false;
-  const reviewExists = numericId ? hasReview(numericId) : false;
-  const review = numericId ? getReview(numericId) : undefined;
 
   const { data: movie, isLoading } = useMovieDetail(movieId);
 
@@ -47,12 +50,14 @@ export function MovieModal({ movieId, onClose }: MovieModalProps) {
   };
 
   const handleToggleList = (listType: 'favorites' | 'watchlist' | 'watched') => {
-    if (!movie) return;
-    if (isInList(listType, movie.id)) {
-      removeFromList(listType, movie.id);
-    } else {
-      addToList(listType, movie);
-    }
+    if (!movie || isMutating) return;
+    toggleList(listType, {
+      id: movie.id,
+      title: movie.title,
+      poster_path: movie.poster_path,
+      backdrop_path: movie.backdrop_path,
+      tmdb_rating: movie.tmdb_rating,
+    });
   };
 
   if (!showModal) return null;
@@ -137,7 +142,7 @@ export function MovieModal({ movieId, onClose }: MovieModalProps) {
                         <span className={`text-xs ${isDark ? 'text-neutral-500' : 'text-neutral-400'}`}>/10</span>
                       </div>
                     )}
-                    {reviewExists && review && (
+                    {reviewExists && review && review.rating !== null && (
                       <div className="flex items-center gap-1 rounded-full border border-red-500/30 bg-red-500/10 px-2.5 py-0.5">
                         <PenLine size={11} className="text-red-400" />
                         <span className="text-xs font-medium text-red-400">
@@ -176,13 +181,13 @@ export function MovieModal({ movieId, onClose }: MovieModalProps) {
                   </div>
                 )}
 
-                {reviewExists && review?.text && (
+                {reviewExists && review?.content && (
                   <div className={`mb-6 rounded-lg border-l-2 border-red-500 pl-4 ${isDark ? 'bg-neutral-800/50' : 'bg-red-50/50'} py-3 pr-4`}>
                     <p className={`mb-1 text-xs font-semibold uppercase tracking-widest ${isDark ? 'text-neutral-500' : 'text-neutral-400'}`}>
                       Sua review
                     </p>
                     <p className={`text-sm leading-relaxed ${isDark ? 'text-neutral-300' : 'text-neutral-700'}`}>
-                      {review.text}
+                      {review.content}
                     </p>
                   </div>
                 )}
@@ -190,7 +195,8 @@ export function MovieModal({ movieId, onClose }: MovieModalProps) {
                 <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
                   <button
                     onClick={() => handleToggleList('favorites')}
-                    className={`flex items-center justify-center gap-2 rounded-lg px-3 py-2.5 text-sm font-medium transition-all ${
+                    disabled={isMutating}
+                    className={`flex items-center justify-center gap-2 rounded-lg px-3 py-2.5 text-sm font-medium transition-all disabled:opacity-60 ${
                       isFavorite
                         ? 'bg-red-600 text-white hover:bg-red-700'
                         : isDark
@@ -204,7 +210,8 @@ export function MovieModal({ movieId, onClose }: MovieModalProps) {
 
                   <button
                     onClick={() => handleToggleList('watchlist')}
-                    className={`flex items-center justify-center gap-2 rounded-lg px-3 py-2.5 text-sm font-medium transition-all ${
+                    disabled={isMutating}
+                    className={`flex items-center justify-center gap-2 rounded-lg px-3 py-2.5 text-sm font-medium transition-all disabled:opacity-60 ${
                       isInWatchlist
                         ? 'bg-blue-600 text-white hover:bg-blue-700'
                         : isDark
@@ -218,7 +225,8 @@ export function MovieModal({ movieId, onClose }: MovieModalProps) {
 
                   <button
                     onClick={() => handleToggleList('watched')}
-                    className={`flex items-center justify-center gap-2 rounded-lg px-3 py-2.5 text-sm font-medium transition-all ${
+                    disabled={isMutating}
+                    className={`flex items-center justify-center gap-2 rounded-lg px-3 py-2.5 text-sm font-medium transition-all disabled:opacity-60 ${
                       isWatched
                         ? 'bg-green-600 text-white hover:bg-green-700'
                         : isDark
@@ -256,6 +264,7 @@ export function MovieModal({ movieId, onClose }: MovieModalProps) {
         <ReviewModal
           movieId={movie.id}
           movieTitle={movie.title}
+          existingReview={review ?? null}
           onClose={() => setShowReviewModal(false)}
         />
       )}

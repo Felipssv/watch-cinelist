@@ -176,3 +176,26 @@ def get_current_user(
             detail="Usuario inativo",
         )
     return user
+
+
+def get_current_user_optional(
+    token: str | None = Depends(oauth2_scheme),
+    db: Session = Depends(get_db),
+) -> User | None:
+    """Dependency opcional: retorna o usuario logado ou None.
+
+    Util em endpoints publicos cujo comportamento muda quando ha um usuario
+    autenticado (ex: listar reviews privadas do proprio autor). Diferente de
+    get_current_user, nao levanta 401 quando o token esta ausente ou invalido.
+    """
+    if not token:
+        return None
+    try:
+        token_data = decode_token(token, expected_type="access")
+    except HTTPException:
+        return None
+
+    user = db.query(User).filter(User.id == token_data.user_id).first()
+    if user is None or not user.is_active:
+        return None
+    return user

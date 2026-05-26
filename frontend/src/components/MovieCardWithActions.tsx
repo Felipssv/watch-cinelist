@@ -1,6 +1,6 @@
 import { MovieCard } from './MovieCard';
 import { Heart, Bookmark, Check } from 'lucide-react';
-import type { ListMovie } from '../store/listStore';
+import type { ListMovie } from '../types/watchlist';
 
 interface MovieCardWithActionsProps {
   movieData: ListMovie;

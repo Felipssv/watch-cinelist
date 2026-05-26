@@ -14,8 +14,10 @@ export interface AuthUser {
 interface AuthState {
   user: AuthUser | null;
   token: string | null;
+  refreshToken: string | null;
   isAuthenticated: boolean;
-  login: (token: string, user: AuthUser) => void;
+  login: (token: string, user: AuthUser, refreshToken?: string) => void;
+  setToken: (token: string) => void;
   logout: () => void;
 }
 
@@ -24,13 +26,16 @@ export const useAuthStore = create<AuthState>()(
     (set) => ({
       user: null,
       token: null,
+      refreshToken: null,
       isAuthenticated: false,
 
-      login: (token, user) =>
-        set({ token, user, isAuthenticated: true }),
+      login: (token, user, refreshToken) =>
+        set({ token, refreshToken: refreshToken ?? null, user, isAuthenticated: true }),
+
+      setToken: (token) => set({ token }),
 
       logout: () =>
-        set({ token: null, user: null, isAuthenticated: false }),
+        set({ token: null, refreshToken: null, user: null, isAuthenticated: false }),
     }),
     {
       name: 'cinelist-auth',

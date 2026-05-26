@@ -7,12 +7,12 @@ import { MovieCard } from '../components/MovieCard';
 import { MovieModal } from '../components/MovieModal';
 import { ChevronRight, Loader2 } from 'lucide-react';
 import { useThemeStore } from '../store/themeStore';
-import { useListStore } from '../store/listStore';
+import { useMovieLists } from '../hooks/useWatchlist';
 import { useMovies } from '../hooks/useMovies';
 
 export default function Home() {
   const { isDark } = useThemeStore();
-  const { addToList, removeFromList, isInList, watched } = useListStore();
+  const { isInList, toggleList, watched } = useMovieLists();
   const navigate = useNavigate();
 
   const [selectedMovieId, setSelectedMovieId] = useState<number | null>(null);
@@ -56,13 +56,15 @@ export default function Home() {
                 isDark={isDark}
                 onPlayClick={() => setSelectedMovieId(featuredMovie.id)}
                 isInList={isInList('watchlist', featuredMovie.id)}
-                onListClick={() => {
-                  if (isInList('watchlist', featuredMovie.id)) {
-                    removeFromList('watchlist', featuredMovie.id);
-                  } else {
-                    addToList('watchlist', featuredMovie);
-                  }
-                }}
+                onListClick={() =>
+                  toggleList('watchlist', {
+                    id: featuredMovie.id,
+                    title: featuredMovie.title,
+                    poster_path: featuredMovie.poster_path,
+                    backdrop_path: featuredMovie.backdrop_path,
+                    tmdb_rating: featuredMovie.tmdb_rating,
+                  })
+                }
               />
             )}
 

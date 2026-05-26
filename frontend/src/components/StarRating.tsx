@@ -13,7 +13,7 @@ interface StarRatingProps {
 export function StarRating({
   value,
   onChange,
-  max = 10,
+  max = 5,
   size = 20,
   readonly = false,
   isDark = false,
