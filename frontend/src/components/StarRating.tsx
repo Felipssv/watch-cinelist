@@ -13,7 +13,7 @@ interface StarRatingProps {
 export function StarRating({
   value,
   onChange,
-  max = 5,
+  max = 10,
   size = 20,
   readonly = false,
   isDark = false,
@@ -21,34 +21,38 @@ export function StarRating({
   const [hovered, setHovered] = useState<number | null>(null);
 
   const display = hovered ?? value;
-  const stars = max === 10 ? 5 : max;
-  const scale = max / stars;
+
+  function valueFromEvent(e: React.MouseEvent<HTMLButtonElement>, starIndex: number): number {
+    const rect = e.currentTarget.getBoundingClientRect();
+    const isLeftHalf = e.clientX - rect.left < rect.width / 2;
+    return isLeftHalf ? starIndex + 0.5 : starIndex + 1;
+  }
 
   return (
     <div className="flex items-center gap-0.5" role="group" aria-label={`Avaliacao ${value} de ${max}`}>
-      {Array.from({ length: stars }, (_, i) => {
-        const starValue = (i + 1) * scale;
-        const halfValue = starValue - scale / 2;
-        const filled = display >= starValue;
-        const half = !filled && display >= halfValue;
+      {Array.from({ length: max }, (_, i) => {
+        const full = i + 1;
+        const half = i + 0.5;
+        const filled = display >= full;
+        const isHalf = !filled && display >= half;
 
         return (
           <button
             key={i}
             type="button"
             disabled={readonly}
-            onClick={() => onChange?.(starValue)}
-            onMouseEnter={() => !readonly && setHovered(starValue)}
-            onMouseLeave={() => !readonly && setHovered(null)}
+            onClick={(e) => onChange?.(valueFromEvent(e, i))}
+            onMouseMove={(e) => { if (!readonly) setHovered(valueFromEvent(e, i)); }}
+            onMouseLeave={() => { if (!readonly) setHovered(null); }}
             className={`transition-transform ${!readonly ? 'cursor-pointer hover:scale-110' : 'cursor-default'}`}
-            aria-label={`${starValue} de ${max}`}
+            aria-label={`${full} de ${max}`}
           >
             <Star
               size={size}
               className={`transition-colors ${
                 filled
                   ? 'fill-amber-400 text-amber-400'
-                  : half
+                  : isHalf
                     ? 'fill-amber-400/50 text-amber-400'
                     : isDark
                       ? 'fill-neutral-700 text-neutral-600'

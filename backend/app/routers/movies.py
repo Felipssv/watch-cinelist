@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from datetime import datetime
 from app.database import get_db
 from app.models import Movie, Genre, MovieGenre
@@ -167,8 +167,13 @@ async def search_movies(
 @router.get("/{tmdb_id}", response_model=MovieResponse)
 async def get_movie(tmdb_id: int, db: Session = Depends(get_db)):
     """Detalhes do filme (busca no banco primeiro, depois TMDB com cache)."""
-    movie = db.query(Movie).filter(Movie.id == tmdb_id).first()
-    # Se ja temos detalhes completos (runtime/budget indicam que o detalhe foi carregado)
+    movie = (
+        db.query(Movie)
+        .options(joinedload(Movie.genres))
+        .filter(Movie.id == tmdb_id)
+        .first()
+    )
+    # Se ja temos detalhes completos (runtime indica que o detalhe foi carregado)
     if movie and movie.runtime is not None:
         return movie
 

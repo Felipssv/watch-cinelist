@@ -30,7 +30,7 @@ export function ReviewModal({
   const updateReview = useUpdateReview();
   const deleteReview = useDeleteReview();
 
-  const [rating, setRating] = useState(existingReview?.rating ?? 3);
+  const [rating, setRating] = useState(existingReview?.rating ?? 5);
   const [text, setText] = useState(existingReview?.content ?? '');
   const [visible, setVisible] = useState(false);
 
@@ -61,7 +61,7 @@ export function ReviewModal({
 
   const handleSave = () => {
     const content = text.trim();
-    // Backend exige content (min_length=1); rating ja esta na escala 1-5.
+    // Backend exige content (min_length=1); rating na escala 0-10.
     if (!content) return;
 
     const input = { content, rating, is_public: true };
@@ -146,7 +146,7 @@ export function ReviewModal({
               <StarRating
                 value={rating}
                 onChange={setRating}
-                max={5}
+                max={10}
                 size={24}
                 isDark={isDark}
               />

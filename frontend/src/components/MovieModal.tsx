@@ -146,7 +146,7 @@ export function MovieModal({ movieId, onClose }: MovieModalProps) {
                       <div className="flex items-center gap-1 rounded-full border border-red-500/30 bg-red-500/10 px-2.5 py-0.5">
                         <PenLine size={11} className="text-red-400" />
                         <span className="text-xs font-medium text-red-400">
-                          Sua nota: {review.rating.toFixed(1)}
+                          Sua nota: {review.rating.toFixed(1)}/10
                         </span>
                       </div>
                     )}

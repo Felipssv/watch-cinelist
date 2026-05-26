@@ -32,7 +32,7 @@ class ReviewCreate(BaseModel):
 
     content: str = Field(..., min_length=1, max_length=10000, description="Texto da review")
     rating: Optional[float] = Field(
-        default=None, ge=1, le=5, description="Nota de 1 a 5 estrelas"
+        default=None, ge=0, le=10, description="Nota de 0 a 10"
     )
     title: Optional[str] = Field(default=None, max_length=255)
     is_public: bool = Field(default=True)
@@ -46,7 +46,7 @@ class ReviewUpdate(BaseModel):
     """
 
     content: Optional[str] = Field(default=None, min_length=1, max_length=10000)
-    rating: Optional[float] = Field(default=None, ge=1, le=5)
+    rating: Optional[float] = Field(default=None, ge=0, le=10)
     title: Optional[str] = Field(default=None, max_length=255)
     is_public: Optional[bool] = None
 

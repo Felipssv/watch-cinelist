@@ -41,7 +41,7 @@ class WatchlistEntryCreate(BaseModel):
     )
     is_favorite: bool = Field(default=False, description="Marcar como favorito")
     rating: Optional[float] = Field(
-        default=None, ge=1, le=5, description="Nota pessoal de 1 a 5 estrelas"
+        default=None, ge=0, le=10, description="Nota pessoal de 0 a 10"
     )
     review: Optional[str] = Field(
         default=None, max_length=10000, description="Anotacao pessoal (privada)"
@@ -60,7 +60,7 @@ class WatchlistEntryUpdate(BaseModel):
 
     status: Optional[WatchStatus] = None
     is_favorite: Optional[bool] = None
-    rating: Optional[float] = Field(default=None, ge=1, le=5)
+    rating: Optional[float] = Field(default=None, ge=0, le=10)
     review: Optional[str] = Field(default=None, max_length=10000)
     notes: Optional[str] = Field(default=None, max_length=10000)
     watched_at: Optional[datetime] = None

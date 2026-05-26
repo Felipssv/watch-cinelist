@@ -1,4 +1,4 @@
-import { useQuery, useInfiniteQuery } from '@tanstack/react-query';
+import { useQuery, useInfiniteQuery, useQueryClient } from '@tanstack/react-query';
 import {
   fetchMovies,
   fetchMovieById,
@@ -26,11 +26,29 @@ export function useMovies() {
 
 export function useMovieDetail(id: number | string | null) {
   const numericId = typeof id === 'string' ? parseInt(id, 10) : id;
+  const queryClient = useQueryClient();
+
   return useQuery({
     queryKey: movieKeys.detail(numericId ?? 0),
     queryFn: () => fetchMovieById(numericId!),
     enabled: numericId !== null && !isNaN(numericId ?? NaN),
     staleTime: 10 * 60 * 1000,
+    // Abre o modal imediatamente com dados já no cache (da listagem)
+    placeholderData: () => {
+      if (numericId == null) return undefined;
+      // Procura nas queries de categoria/busca que já foram carregadas
+      const allQueries = queryClient.getQueriesData<{ pages?: { results: { id: number }[] }[] }>({
+        queryKey: movieKeys.all,
+      });
+      for (const [, data] of allQueries) {
+        if (!data?.pages) continue;
+        for (const page of data.pages) {
+          const found = page.results?.find((m) => m.id === numericId);
+          if (found) return found as ReturnType<typeof fetchMovieById> extends Promise<infer T> ? T : never;
+        }
+      }
+      return undefined;
+    },
   });
 }
 

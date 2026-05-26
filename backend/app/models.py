@@ -196,7 +196,7 @@ class WatchlistEntry(Base):
     __tablename__ = "watchlist_entries"
     __table_args__ = (
         # Integridade semantica
-        CheckConstraint("rating IS NULL OR (rating >= 1 AND rating <= 5)", name="ck_watchlist_rating_range"),
+        CheckConstraint("rating IS NULL OR (rating >= 0 AND rating <= 10)", name="ck_watchlist_rating_range"),
         # Integridade de entidade: sem duplicatas
         UniqueConstraint("user_id", "movie_id", name="uq_watchlist_user_movie"),
         # Indexes
@@ -256,9 +256,9 @@ class Review(Base):
 
     __tablename__ = "reviews"
     __table_args__ = (
-        # Integridade semantica: rating de 1 a 5 estrelas (ou nulo)
+        # Integridade semantica: rating de 0 a 10 (ou nulo)
         CheckConstraint(
-            "rating IS NULL OR (rating >= 1 AND rating <= 5)",
+            "rating IS NULL OR (rating >= 0 AND rating <= 10)",
             name="ck_reviews_rating_range",
         ),
         CheckConstraint("length(trim(content)) > 0", name="ck_reviews_content_not_empty"),

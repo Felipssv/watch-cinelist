@@ -457,7 +457,7 @@ function ReviewsGrid({
 
             {review.rating !== null && (
               <div className="mb-3">
-                <StarRating value={review.rating} max={5} size={16} readonly isDark={isDark} />
+                <StarRating value={review.rating} max={10} size={16} readonly isDark={isDark} />
               </div>
             )}
 
